@@ -115,6 +115,19 @@ def preflight(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path 
     """
     problems = 0
 
+    # Positional input is a convenience alias; existing automation flags remain valid.
+    if getattr(args, "input", None):
+        if args.video or args.image is not None:
+            print(f"{BAD} pass the positional input OR --video / --image")
+            sys.exit(1)
+        if Path(args.input).suffix.lower() == ".npz":
+            if args.skeleton:
+                print(f"{BAD} pass only one cached skeleton path")
+                sys.exit(1)
+            args.skeleton = args.input
+        else:
+            args.video = args.input
+
     def check(label: str, present: bool, hint: str) -> bool:
         nonlocal problems
         if not _check(label, present, hint):
@@ -268,7 +281,27 @@ def run(args: argparse.Namespace) -> int:
         traceback.print_exc()
         return 1
     print(f"\nresults: {run_dir}")
+    if getattr(args, "inspect", False):
+        return inspect_run(run_dir, video or image)
     return 0
+
+
+def inspect_run(run_dir, source=None, *, port=0, open_browser=True) -> int:
+    from .inspection.server import serve_inspection
+    try:
+        serve_inspection(Path(run_dir), Path(source) if source else None,
+                         port=port, open_browser=open_browser)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"{BAD} cannot open inspector: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _port(value: str) -> int:
+    port = int(value)
+    if not 0 <= port <= 65535:
+        raise argparse.ArgumentTypeError("port must be between 0 and 65535 (0 selects a free port)")
+    return port
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -283,7 +316,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor = sub.add_parser("doctor", help="check assets, weights and dependencies")
     p_doctor.add_argument("--skeleton", help="check cached-skeleton export without source video or SMPL-X")
 
+    p_inspect = sub.add_parser("inspect", help="reopen an existing run in the synchronized web inspector")
+    p_inspect.add_argument("run_dir", help="run folder containing target_motion.npz")
+    p_inspect.add_argument("--video", help="override the original video/image path")
+    p_inspect.add_argument("--port", type=_port, default=0, help="localhost port (default: choose a free port)")
+    p_inspect.add_argument("--no-browser", action="store_true", help="print the local URL without opening a browser")
+
     p_run = sub.add_parser("run", help="video, still or cached skeleton -> VMD/BVH, results in outputs/")
+    p_run.add_argument("input", nargs="?", help="input video, still image or cached skeleton (alias for the source flags)")
+    p_run.add_argument("--inspect", action="store_true", help="open synchronized video / 3D inspection after exporting; Ctrl+C closes the server")
     p_run.add_argument("--format", choices=["vmd", "bvh"], default="vmd", help="output format (default: vmd)")
     p_run.add_argument("--mmd-profile", choices=["standard"], default="standard", help="MMD reference skeleton")
     p_run.add_argument("--model", help="PMX target skeleton/proportions for VMD/BVH (default: standard profile)")
@@ -341,6 +382,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "doctor":
         sys.exit(doctor(args.skeleton))
+    if args.command == "inspect":
+        sys.exit(inspect_run(args.run_dir, args.video, port=args.port, open_browser=not args.no_browser))
     sys.exit(run(args))
 
 

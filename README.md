@@ -49,6 +49,7 @@ User assets and generated outputs are gitignored. See [asset locations](assets/R
 ```powershell
 v2vmd doctor
 v2vmd run --video assets/video/dance.mp4 --device cuda --foot-lock
+v2vmd run assets/video/dance.mp4 --device cuda --foot-lock --inspect
 v2vmd run --image assets/image/pose.jpg --model assets/mmd/character.pmx
 
 # Reuse extraction and change the target quickly.
@@ -76,6 +77,32 @@ See [format conventions, IK mode and quality limits](docs/vmd-retargeting.md).
 Foot cleanup is conservative. Fingers, face, gaze and secondary animation are
 not captured; head orientation follows a coarse fitted neck axis.
 
+## Motion inspector
+
+`v2vmd run path/to/video --inspect` opens a local browser viewer after export:
+source video on the left, interactive 3D skeleton on the right, and one shared
+timeline below. Video time drives the skeleton, including seeking and playback
+speed changes. Pause, step frame by frame, orbit/zoom, or compare **Raw**,
+**Corrected** and **Overlay**. The default view hides PMX helper bones.
+
+Reopen an existing run without extraction or retargeting:
+
+```powershell
+v2vmd inspect outputs/previous
+v2vmd inspect outputs/previous --video path/to/original.mp4
+v2vmd inspect outputs/previous --port 8765 --no-browser
+```
+
+Keep the command running while inspecting; **Ctrl+C** closes the local server.
+It binds only to `127.0.0.1` and needs no internet or extra web packages. With
+ffmpeg available, a seekable H.264/AAC proxy is cached under the run's
+`inspection/` directory; the original video is unchanged. Stills and cached
+runs with missing media also support motion-only playback.
+
+The viewer uses FK from the saved target motion NPZ (before VMD serialization),
+so no PMX asset is required to reopen it. It shows skeleton motion; mesh skinning,
+PMX physics, and a destination application's IK solver are not simulated.
+
 ## Blender
 
 The [Video2VMD extension](blender_extension/README.md) runs the external Python
@@ -89,6 +116,7 @@ not load PyTorch, GVHMR or OpenCV.
 python scripts/verify_mmd.py
 python scripts/verify_video_input.py
 python scripts/verify_blender_extension.py
+python scripts/verify_inspection.py
 python scripts/package_blender_extension.py
 ```
 

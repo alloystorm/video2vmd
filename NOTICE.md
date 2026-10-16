@@ -30,6 +30,11 @@ The shared vmd2png codec/skeleton package is MIT-licensed. It is installed as a
 pinned dependency, not copied into this repository.
 https://github.com/alloystorm/vmd2png
 
+The local motion inspector's canvas projection, orbit/zoom interactions and
+precomputed pose-buffer approach are adapted from the user's motion_encoder
+project (`inspect_data.py`). This viewer uses Video2VMD's saved target hierarchy
+and FK, with a shared video clock, rather than importing its training stack.
+
 ## Inference weights
 
 The extraction step auto-downloads model checkpoints (GVHMR, HMR2, RTMPose /

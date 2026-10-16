@@ -24,6 +24,8 @@ All user assets and generated outputs remain gitignored.
 ```bash
 v2vmd doctor
 v2vmd run --video assets/video/dance.mp4 --device cuda --foot-lock
+v2vmd run assets/video/dance.mp4 --device cuda --foot-lock --inspect
+v2vmd inspect outputs/<run>  # reopen saved motion + original video in a local browser
 v2vmd run --image assets/image/pose.jpg --model assets/mmd/character.pmx
 v2vmd doctor --skeleton outputs/<run>/skeleton_motion.npz
 v2vmd run --skeleton outputs/<run>/skeleton_motion.npz --model character.pmx --foot-lock
@@ -56,6 +58,8 @@ coordinate bases, root ownership and quaternion conventions explicit.
 - `video2vmd/cli.py`, `paths.py`: CLI, preflight and locations.
 - `video2vmd/extract.py`: GVHMR video/still extraction and input staging.
 - `video2vmd/mmd/`: profiles, body retargeting, contacts, export, preview, pipeline.
+- `video2vmd/inspection/`: localhost viewer, source proxy, HTTP byte ranges,
+  raw/corrected FK buffers and video-clock-driven canvas playback. No training imports.
 - `blender_extension/video2vmd_blender/`: thin Blender UI and subprocess services.
 - `docs/vmd-retargeting.md`: format contract, controls and known limits.
 
@@ -77,7 +81,8 @@ See `blender_extension/README.md` and `docs/blender-extension.md`.
 ## Verification
 
 Run `python scripts/verify_mmd.py`, `python scripts/verify_video_input.py`, and
-`python scripts/verify_blender_extension.py`. Independent VMD/BVH import scripts
+`python scripts/verify_blender_extension.py`, plus `python scripts/verify_inspection.py`
+for viewer data/HTTP/CLI changes. Independent VMD/BVH import scripts
 run in fresh background Blender processes, never the user's open scene. Shared
 codec changes belong in the separate vmd2png repository; pin a published tested
 revision and leave the motion_encoder checkout unchanged.

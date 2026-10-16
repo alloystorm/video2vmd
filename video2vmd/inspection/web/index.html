@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video2VMD · Motion inspector</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/viewer.js" defer></script>
+</head>
+<body>
+  <header><div><span class="brand">V2VMD</span><span class="divider">/</span><strong>Motion inspector</strong></div><span id="summary">Loading motion…</span></header>
+  <main>
+    <section class="pane source">
+      <div class="pane-title"><span>01 <b>Source video</b></span><span id="source-name"></span></div>
+      <div class="viewport" id="source-view"><video id="video" playsinline preload="auto" muted></video><img id="image" alt="Source still" hidden><p id="source-note" hidden></p></div>
+    </section>
+    <section class="pane motion">
+      <div class="pane-title"><span>02 <b>Retargeted skeleton</b></span><select id="variant" aria-label="Motion variant"></select></div>
+      <div class="viewport"><canvas id="scene" aria-label="Interactive 3D skeleton. Drag to orbit, scroll to zoom."></canvas><div class="legend"><span class="left">● Left</span><span class="right">● Right</span><span id="overlay-key" hidden>● Raw ghost</span></div><span id="frame-badge">FRAME 0000</span></div>
+      <div class="view-options"><span class="presets"><button id="front">Front</button><button id="side">Side</button><button id="reset">Reset view</button></span><label><input id="follow" type="checkbox" checked> Follow root</label><label><input id="helpers" type="checkbox"> All bones</label></div>
+    </section>
+  </main>
+  <footer>
+    <div class="timeline-label"><span id="time">00:00.000</span><span id="duration">00:00.000</span></div>
+    <input id="timeline" type="range" min="0" max="1" step="any" value="0" aria-label="Synchronized video and motion timeline" disabled>
+    <div class="transport"><div class="buttons"><button id="previous" title="Previous frame (←)" aria-label="Previous frame">|‹</button><button id="play" class="primary" title="Play / pause (Space)" disabled>Play</button><button id="next" title="Next frame (→)" aria-label="Next frame">›|</button><label class="speed"><select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><label><input id="loop" type="checkbox" checked> Loop</label><button id="sound" aria-pressed="false">Unmute</button></div><span id="status" role="status">Preparing the inspector…</span></div>
+    <div class="help">Space to play · ← → to step · Drag the 3D view to orbit · Scroll to zoom <span>Body motion only · Fingers and face are not captured</span></div>
+  </footer>
+</body>
+</html>

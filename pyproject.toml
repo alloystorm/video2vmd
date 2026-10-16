@@ -23,3 +23,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["video2vmd*"]
+
+[tool.setuptools.package-data]
+"video2vmd.inspection" = ["web/*.html", "web/*.js", "web/*.css"]
