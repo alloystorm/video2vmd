@@ -35,6 +35,12 @@ precomputed pose-buffer approach are adapted from the user's motion_encoder
 project (`inspect_data.py`). This viewer uses Video2VMD's saved target hierarchy
 and FK, with a shared video clock, rather than importing its training stack.
 
+Foot cleanup draws on the user's DanceXR implementation in
+`dxr_native/rig/src/FeetSolver.cpp`: separate heel/toe clearance, bounded residual
+pitch, up-only swing correction and a horizontal anti-slide limit. Video2VMD
+implements these in its offline target-space solver with inferred contacts and
+exact rigid rotation/reach calculations; it does not import the native runtime.
+
 ## Inference weights
 
 The extraction step auto-downloads model checkpoints (GVHMR, HMR2, RTMPose /

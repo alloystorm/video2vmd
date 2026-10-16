@@ -135,11 +135,25 @@ can still be attenuated, so the option defaults off and needs inspection.
 Contact detection requires a heel/toe proxy within 3.5 cm of the floor, moving
 slower than 0.35 m/s for at least 0.1 seconds. Each interval gets a persistent
 horizontal anchor with a short transition ramp. Heel/toe tests are separate so
-rolling support need not lock both points. The leg solver preserves segment
-lengths and raw ankle orientation, lowers the pelvis by at most 8 cm when needed,
-and reports unreachable contacts. Fast steps, uncertain contacts and airborne
-samples remain uncorrected. Contact labels are heuristics, not observed ground
-truth; monocular extraction errors, missing floor evidence and residual sliding
+rolling support need not lock both points. The solver adapts the heel/toe
+decomposition and up-only swing clearance from DanceXR's
+`dxr_native/rig/src/FeetSolver.cpp`. It uses an exact rigid pitch calculation,
+capped at 0.26 radians (15 degrees), and preserves toe-local articulation.
+Both endpoints flatten only with evidence for both contacts; heel rolls and toe
+stands keep their unsupported end raised. An unplanted foot is pushed up only
+if its proxy penetrates the floor. Above-floor swing and airborne frames remain
+unchanged unless another support needs a pelvis adjustment; that adjustment
+compensates the swing leg to preserve its original ankle position/orientation.
+
+The leg solve preserves segment lengths, caps horizontal anchor correction at
+12 cm, and lowers the pelvis by at most 8 cm using the exact vertical reach
+bound. Existing contact ramps blend touchdown/lift-off; the offline solve adds
+no causal smoothing lag, COM-driven planting, gravity or artificial body bounce.
+`quality.json` reports reach residuals, pitch, slide limits, pelvis lowering and
+additional swing-clearance frames. The contact mask stays fixed for before/after
+comparisons, including with depth cleanup. Contact labels and the ankle/toe sole
+geometry are proxies, not observed ground truth or collision tests against the
+character mesh. Monocular errors, missing floor evidence and residual sliding
 remain possible. Root and jerk diagnostics make adverse cleanup changes visible.
 
 Default VMD **FK mode** disables foot/toe IK explicitly and bakes solved legs.
@@ -148,7 +162,11 @@ foot-IK targets, and supported local-X knee hinge limits. The baked legs provide
 a solver-consistent seed; foot controls follow the solved ankles in their actual
 parent space. Foot IK stays enabled and toe IK stays disabled throughout the clip.
 This avoids a second conflicting leg solution but does not guarantee identical
-results in every MMD player's iterative solver.
+results in every MMD player's iterative solver. Expanded AB7 Blender checks
+measure up to 8.3 mm toe-position and 2.7 degree ankle-orientation differences
+in both raw and corrected IK playback. The body-position check retains its 5 mm
+limit; toe/ankle checks use separate 10 mm / 3 degree IK budgets. Baked FK retains
+the stricter checks and reproduces the solved heel/toe placement.
 
 PMX metadata ingestion covers parents, rest positions, fixed/local axes,
 inheritance and IK limits. Inherited transforms on body controls/ancestors are
@@ -175,6 +193,9 @@ Fifteen deterministic retarget/export/contact tests cover rest/asymmetric anatom
 root heading/travel, resampling/fractional FPS, planted feet, airborne preservation, encoder
 agreement, BVH timing, knee hinges, skull-center neck offsets, coherent upper-body
 lean, raw/corrected pipeline output and asset-independent skeleton preflight.
+Eight further checks in `scripts/verify_feet.py` cover double/partial support,
+swing clearance, jump preservation, opposite-leg compensation, degenerate
+contact geometry, heading invariance and unreachable-target limits.
 The shared codec has 11 unittest checks; the motion_encoder pose/leg regressions
 (4 + 6) also pass against the new codec.
 
@@ -192,11 +213,16 @@ blender --background --factory-startup --python-exit-code 1 --python scripts/ver
 ```
 
 Local validation on the supplied AB7 model and an 817-frame video: sampled FK
-playback error below 0.001 mm; optional IK mode below 3.5 mm. Standard-profile BVH
+playback error below 0.001 mm; optional IK body-position error below 3.5 mm
+(toe/ankle differences are described above). Standard-profile BVH
 sampled playback error below 0.001 mm. These measure export/playback agreement,
 not accuracy of the person reconstructed from video. On detected contacts in
 that clip, mean horizontal speed fell from 0.270 to 0.082 m/s; only 84/817 frames
-qualified. Maximum remaining floor penetration was 14 mm. The separate reachable
+qualified. The current heel/toe solver with depth cleanup gives 0.069 m/s contact
+speed and less than 0.001 mm proxy floor penetration on that same clip, against
+0.070 m/s and 14.6 mm with the earlier depth-plus-foot solver. Contact evidence is
+identical (93 heel/toe samples over 84 frames); this does not establish mesh
+clearance or motion accuracy. The separate reachable
 planted fixture meets the 5 mm drift/penetration targets. Broader walking, jumping,
 occlusion and pivot footage still needs review before stronger quality claims.
 

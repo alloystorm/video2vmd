@@ -100,5 +100,6 @@ revision and leave the motion_encoder checkout unchanged.
 
 Run `node scripts/verify_inspection_projection.cjs` for overlap projection changes.
 Run `python scripts/verify_depth_cleanup.py` for depth-cleanup or related pipeline changes.
+Run `python scripts/verify_feet.py` for contact, heel/toe pitch or leg-solver changes.
 `scripts/cache_inspection_camera.py` can add camera arrays to an older run using
 its matching trusted local GVHMR cache; it needs SMPL-X but does not rerun inference.

@@ -73,37 +73,94 @@ def _frame_fk(motion, frame):
     return p[0], r[0]
 
 
+def _foot_target(points, ankle, anchors, weights, floor):
+    """Heel/toe residual pitch and translation, including up-only swing clearance.
+
+    Adapted from dxr_native/rig/src/FeetSolver.cpp's two-contact decomposition.
+    Use an exact rigid rotation here rather than its small-angle approximation.
+    Contact evidence supplies plant weights; no COM/gravity motion is synthesized.
+    """
+    total = float(weights.sum())
+    plant = min(1., total)
+    low, high = np.argsort(points[:, 1])
+    desired = points[:, 1].copy()
+    desired[low] = max(floor, desired[low]) * (1-plant) + floor*plant
+    desired[high] = max(floor, desired[high] + min(0., desired[low]-points[low, 1]))
+    # Flatten only when BOTH endpoints have support evidence. A toe stand or
+    # heel roll keeps the unsupported end raised.
+    desired[high] += min(weights) * (floor-desired[high])
+    vector = points[1]-points[0]
+    length = np.linalg.norm(vector)
+    horizontal = np.hypot(vector[0], vector[2])
+    tilt, angle = np.eye(3), 0.
+    if horizontal > 1e-6 and length > 1e-6:
+        current = np.arctan2(vector[1], horizontal)
+        wanted = np.arcsin(np.clip((desired[1]-desired[0])/length, -1., 1.))
+        angle = float(np.clip(current-wanted, -.26, .26))
+        axis = np.cross([0., 1., 0.], vector) / horizontal
+        tilt = Rotation.from_rotvec(axis*angle).as_matrix()
+    rotated = ankle + (points-ankle) @ tilt.T
+    delta = np.zeros(3)
+    if total > 0:
+        delta = np.average(anchors-rotated, axis=0, weights=weights) * plant
+        delta[1] = np.average(floor-rotated[:, 1], weights=weights) * plant
+    # Swing feet can be pushed UP out of the floor, never pulled down to it.
+    delta[1] = max(delta[1], floor-rotated[:, 1].min())
+    slide = np.linalg.norm(delta[[0, 2]])
+    if slide > .12:
+        delta[[0, 2]] *= .12/slide
+    return ankle+delta, tilt, angle, slide > .12
+
+
 def correct_feet(motion, contacts):
     out = TargetMotion(motion.profile, motion.rotations.copy(), motion.translations.copy(), motion.fps)
     original_points = foot_points(motion)
     raw_pos, raw_rot = motion.fk()
     profile = motion.profile
     root = profile.index[profile.root]
-    residuals = []
+    residuals, pitches = [], []
+    collision_frames = corrected_frames = slide_limited = 0
+    maximum_lowering = 0.
     for frame in range(motion.n_frames):
         targets = []
+        collision = False
         for side_num, side in enumerate(("Left", "Right")):
             sl = slice(side_num*2, side_num*2+2)
             weights = contacts["weights"][frame, sl]
             total = weights.sum()
-            if total <= 0:
+            penetrating = original_points[frame, sl, 1].min() < contacts["floor_m"]-1e-8
+            if total <= 0 and not penetrating:
                 continue
+            collision |= penetrating and total <= 0
             ankle = profile.index[side+"Ankle"]
-            delta = np.average(contacts["anchors_m"][frame, sl]-original_points[frame, sl], axis=0, weights=weights)
-            delta[1] = contacts["floor_m"]-original_points[frame, sl, 1].min()
-            delta *= min(1., total)
-            targets.append((side, raw_pos[frame, ankle] + delta))
+            target, tilt, pitch, limited = _foot_target(
+                original_points[frame, sl], raw_pos[frame, ankle],
+                contacts["anchors_m"][frame, sl], weights, contacts["floor_m"])
+            targets.append((side, target, tilt))
+            pitches.append(abs(pitch))
+            slide_limited += int(limited)
         if not targets:
             continue
-        # Lower the pelvis only when a support target would over-extend a leg.
+        corrected_frames += 1
+        collision_frames += int(collision)
+        # Solve the vertical reach bound exactly (a radial shortfall is not a
+        # vertical displacement). Keep the 8 cm pelvis safety limit.
         needed = []
-        for side, target in targets:
+        for side, target, _ in targets:
             hi, ki, ai = [profile.index[side+part] for part in ("Leg", "Knee", "Ankle")]
             length = np.linalg.norm(raw_pos[frame, ki]-raw_pos[frame, hi])+np.linalg.norm(raw_pos[frame, ai]-raw_pos[frame, ki])
-            difference = np.linalg.norm(target-raw_pos[frame, hi])-length
-            needed.append(max(0., difference))
-        out.translations[frame, root, 1] -= min(.08, max(needed, default=0.) + 1e-5)
-        for side, target in targets:
+            difference = raw_pos[frame, hi]-target
+            vertical = np.sqrt(max(0., (length-1e-6)**2-np.sum(difference[[0, 2]]**2)))
+            needed.append(max(0., difference[1]-vertical))
+        lower = min(.08, max(needed, default=0.))
+        maximum_lowering = max(maximum_lowering, lower)
+        out.translations[frame, root, 1] -= lower
+        if lower > 0:
+            # Keep the other foot on its observed swing path as the body lowers.
+            for side in ("Left", "Right"):
+                if not any(item[0] == side for item in targets):
+                    targets.append((side, raw_pos[frame, profile.index[side+"Ankle"]], np.eye(3)))
+        for side, target, tilt in targets:
             hi, ki, ai = [profile.index[side+part] for part in ("Leg", "Knee", "Ankle")]
             p, r = _frame_fk(out, frame)
             knee, reached = solve_leg(p[hi], p[ki], p[ai], target, r[root] @ np.array([0., 0., -1.]))
@@ -115,14 +172,18 @@ def correct_feet(motion, contacts):
             desired_knee = align(p2[ai]-p2[ki], reached-p2[ki]) @ r2[ki]
             out.rotations[frame, ki] = Rotation.from_matrix(r2[profile.parents[ki]].T @ desired_knee).as_quat()
             p3, r3 = _frame_fk(out, frame)
-            # Preserve the raw foot orientation while solving its position.
-            out.rotations[frame, ai] = Rotation.from_matrix(r3[profile.parents[ai]].T @ raw_rot[frame, ai]).as_quat()
+            # Preserve toe-local articulation while applying the residual sole
+            # pitch to the ankle in WORLD space (including turned characters).
+            out.rotations[frame, ai] = Rotation.from_matrix(r3[profile.parents[ai]].T @ tilt @ raw_rot[frame, ai]).as_quat()
             residuals.append(float(np.linalg.norm(p3[ai]-target)))
     # Enforce the quaternion double-cover convention after correction.
     for frame in range(1, out.n_frames):
         flip = np.sum(out.rotations[frame-1]*out.rotations[frame], axis=1) < 0
         out.rotations[frame, flip] *= -1
-    return out, {"max_reach_residual_m": max(residuals, default=0.), "corrected_frames": int(np.any(contacts["contact"], axis=1).sum())}
+    return out, {"method": "heel_toe_clearance_v2", "max_reach_residual_m": max(residuals, default=0.),
+                 "corrected_frames": corrected_frames, "swing_clearance_frames": collision_frames,
+                 "slide_limited_foot_frames": slide_limited, "max_foot_pitch_correction_rad": max(pitches, default=0.),
+                 "max_pelvis_lowering_m": maximum_lowering}
 
 
 def quality(motion, contacts):
