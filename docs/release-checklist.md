@@ -1,28 +1,15 @@
 # Release checklist
 
-## Repository
-
-- [ ] Working tree is clean
-- [x] Version numbers are consistent
-- [x] No gated models, weights, Mixamo assets, or user inputs are tracked
-- [x] README instructions match the current CLI
-- [x] CHANGELOG is updated
-- [x] Release notes are prepared
-
-## Validation
-
-- [x] Package imports successfully
-- [x] CLI help works
-- [x] `m2mr doctor` runs and reports environment status
-- [x] Video pipeline smoke test completed
-- [x] Image pipeline smoke test completed
-- [x] Generated NPZ files load successfully
-- [x] Generated GLB imports into Blender
-
-## Publishing
-
-- [ ] Release preparation commit is pushed
-- [ ] Annotated tag is created
-- [ ] Tag is pushed
-- [ ] GitHub Release is created
-- [ ] Release URL opens successfully
+- Keep package and Blender manifest versions aligned (current fork: 0.2.0).
+- Run the MMD, video-input and Blender-extension verification scripts.
+- Export VMD/BVH from a cached skeleton through `v2vmd`; inspect raw/corrected
+  files, quality reports and preview. Validate independently in Blender.
+- Build a Python wheel and confirm it contains only the `video2vmd` package and
+  the `v2vmd` console entry point; no legacy exporter or gated assets.
+- Build `dist/video2vmd-0.2.0.zip` and run Blender's extension validator.
+- Verify install/upgrade in an external Python environment and the Blender UI.
+- Confirm the pinned vmd2png commit is published and installable from GitHub.
+- Review README, migration notes, CHANGELOG, LICENSE and NOTICE. Older release
+  notes / translated upstream READMEs are explicitly historical.
+- Ensure models, weights, videos, temporary worktrees and generated outputs are
+  excluded from commits and distribution packages.

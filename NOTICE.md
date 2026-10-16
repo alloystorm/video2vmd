@@ -20,12 +20,15 @@ Institute for Intelligent Systems for non-commercial scientific research.
 Users must register and download `SMPLX_NEUTRAL.npz` themselves.
 https://smpl-x.is.tue.mpg.de/
 
-## Adobe Mixamo characters
+## Project origins and shared VMD codec
 
-Mixamo characters (Y Bot and others) are provided by Adobe under the Mixamo
-terms of use. Download them with your own Adobe account; the FBX files are
-never committed to this repository.
-https://www.mixamo.com/
+Video2VMD derives from Max Liu's Motion2MixamoRig; original copyright and license
+notices are retained. The legacy character-export implementation has been removed.
+https://github.com/MaxLiu22/Motion2MixamoRig
+
+The shared vmd2png codec/skeleton package is MIT-licensed. It is installed as a
+pinned dependency, not copied into this repository.
+https://github.com/alloystorm/vmd2png
 
 ## Inference weights
 

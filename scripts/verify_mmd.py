@@ -3,6 +3,8 @@
 Run with the project's mmd extra installed: python scripts/verify_mmd.py
 """
 import argparse
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import json
 from pathlib import Path
 import sys
@@ -15,16 +17,16 @@ from scipy.spatial.transform import Rotation
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from motion2mixamorig import paths
-from motion2mixamorig.cli import build_parser, preflight
-from motion2mixamorig.extract import SMPL_JOINT_NAMES
-from motion2mixamorig.human_motion import HumanMotion
-from motion2mixamorig.mmd.profile import standard_profile
-from motion2mixamorig.mmd.motion import TargetMotion
-from motion2mixamorig.mmd.retarget import SOURCE_TO_MMD, retarget
-from motion2mixamorig.mmd.contacts import correct_feet, detect_contacts, foot_points, quality, constrain_ik_knees
-from motion2mixamorig.mmd.export import write_vmd, write_bvh, write_motion_encoder
-from motion2mixamorig.mmd.pipeline import run_mmd_pipeline
+from video2vmd import paths
+from video2vmd.cli import build_parser, doctor, preflight
+from video2vmd.extract import SMPL_JOINT_NAMES
+from video2vmd.human_motion import HumanMotion
+from video2vmd.mmd.profile import standard_profile
+from video2vmd.mmd.motion import TargetMotion
+from video2vmd.mmd.retarget import SOURCE_TO_MMD, retarget
+from video2vmd.mmd.contacts import correct_feet, detect_contacts, foot_points, quality, constrain_ik_knees
+from video2vmd.mmd.export import write_vmd, write_bvh, write_motion_encoder
+from video2vmd.mmd.pipeline import run_mmd_pipeline
 
 
 def human_fixture(count=60, fps=30.):
@@ -229,15 +231,26 @@ class MMDTests(unittest.TestCase):
         source, profile = human_fixture(1)
         path = self.root/"skeleton.npz"
         np.savez(path, joints_3d=source.joints_3d, joint_names=source.joint_names, fps=source.fps)
-        args = build_parser().parse_args(["run", "--format", "vmd", "--skeleton", str(path)])
+        args = build_parser().parse_args(["run", "--skeleton", str(path)])
         with patch.object(paths, "SMPLX_NEUTRAL", self.root/"absent.npz"), \
-             patch.object(paths, "MIXAMO_DIR", self.root/"absent"), \
-             patch("motion2mixamorig.checks.check_video", side_effect=AssertionError("unexpected video check")):
-            video, rig, skeleton, image = preflight(args)
+             patch("video2vmd.checks.check_video", side_effect=AssertionError("unexpected video check")):
+            video, skeleton, image = preflight(args)
+            with redirect_stdout(StringIO()) as output:
+                self.assertEqual(doctor(str(path)), 0)
+            self.assertNotIn("Mixamo rig", output.getvalue())
+            self.assertNotIn("mixamo.com", output.getvalue())
         self.assertEqual(skeleton, path)
         self.assertIsNone(video)
-        self.assertIsNone(rig)
         self.assertIsNone(image)
+
+    def test_v2vmd_defaults_to_vmd_and_rejects_legacy_target_options(self):
+        parser = build_parser()
+        self.assertEqual(parser.prog, "v2vmd")
+        self.assertEqual(parser.parse_args(["run"]).format, "vmd")
+        for arguments in (["run", "--rig", "character.fbx"], ["run", "--format", "glb"]):
+            with self.subTest(arguments=arguments), redirect_stderr(StringIO()), self.assertRaises(SystemExit) as error:
+                parser.parse_args(arguments)
+            self.assertEqual(error.exception.code, 2)
 
     def test_pipeline_writes_raw_corrected_and_compatible_vmd_files(self):
         source, profile = human_fixture(30)

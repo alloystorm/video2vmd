@@ -1,5 +1,7 @@
 # VMD retargeting plan
 
+> Historical implementation roadmap. Version 0.2 removes the legacy Mixamo/GLB path and renames the CLI/package to `v2vmd`/`video2vmd`. Use [the current guide](vmd-retargeting.md) for supported commands.
+
 Prepared 2026-10-16 for `alloystorm/video2vmd`, after reviewing the local
 `D:/studio/Projects/motion_encoder` checkout. The design below is retained as the
 roadmap; the first implementation now exists. Current commands, validation and

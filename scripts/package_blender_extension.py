@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build dist/motion2mixamorig-0.1.5.zip for Blender 4.2+.
+"""Build dist/video2vmd-0.2.0.zip for Blender 4.2+.
 
 The zip root contains blender_manifest.toml and __init__.py directly — no
 extra wrapping folder.
@@ -8,13 +8,14 @@ extra wrapping folder.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "blender_extension" / "motion2mixamorig_blender"
+SRC = ROOT / "blender_extension" / "video2vmd_blender"
 DIST = ROOT / "dist"
 REQUIRED_MANIFEST_FIELDS = (
     "schema_version",
@@ -45,7 +46,7 @@ def read_manifest(path: Path) -> dict[str, str]:
 
 def extension_version(src: Path = SRC) -> str:
     manifest = read_manifest(src / "blender_manifest.toml")
-    return manifest.get("version", "0.1.5")
+    return manifest.get("version", "0.2.0")
 
 
 def should_include(path: Path) -> bool:
@@ -62,7 +63,7 @@ def build_zip(src: Path = SRC, dest: Path | None = None) -> Path:
     if not (src / "blender_manifest.toml").is_file() or not (src / "__init__.py").is_file():
         raise FileNotFoundError(f"extension sources are incomplete: {src}")
     version = extension_version(src)
-    dest = dest or (DIST / f"motion2mixamorig-{version}.zip")
+    dest = dest or (DIST / f"video2vmd-{version}.zip")
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         dest.unlink()
@@ -85,13 +86,13 @@ def validate_zip(zip_path: Path) -> list[str]:
         errors.append("zip root is missing blender_manifest.toml")
     if "__init__.py" not in names:
         errors.append("zip root is missing __init__.py")
-    if any(name.startswith("motion2mixamorig_blender/") for name in names):
+    if any(name.startswith("video2vmd_blender/") for name in names):
         errors.append("zip has an extra wrapping directory")
     if any(name.startswith("blender_extension/") for name in names):
         errors.append("zip includes the repository blender_extension/ prefix")
     top_dirs = {name.split("/", 1)[0] for name in names if "/" in name}
-    if "blender_manifest.toml" in names and "motion2mixamorig_blender" in top_dirs:
-        errors.append("zip root is nested under motion2mixamorig_blender/")
+    if "blender_manifest.toml" in names and "video2vmd_blender" in top_dirs:
+        errors.append("zip root is nested under video2vmd_blender/")
     try:
         with zipfile.ZipFile(zip_path) as archive:
             manifest_text = archive.read("blender_manifest.toml").decode("utf-8")
@@ -100,8 +101,8 @@ def validate_zip(zip_path: Path) -> list[str]:
     for field in REQUIRED_MANIFEST_FIELDS:
         if f"{field} =" not in manifest_text and f"{field}=" not in manifest_text:
             errors.append(f"manifest is missing {field}")
-    if 'id = "motion2mixamorig"' not in manifest_text:
-        errors.append("manifest id must be motion2mixamorig")
+    if 'id = "video2vmd"' not in manifest_text:
+        errors.append("manifest id must be video2vmd")
     return errors
 
 
@@ -118,11 +119,20 @@ def maybe_blender_validate(zip_path: Path) -> str | None:
         return None
     import subprocess
 
+    # Validation must not load the user's add-ons or write their preferences.
+    validation_root = ROOT / "outputs" / "blender_extension_validation"
+    env = os.environ.copy()
+    for key, folder in (("BLENDER_USER_RESOURCES", "resources"), ("BLENDER_USER_CONFIG", "config"),
+                        ("BLENDER_USER_EXTENSIONS", "extensions")):
+        location = validation_root / folder
+        location.mkdir(parents=True, exist_ok=True)
+        env[key] = str(location)
     completed = subprocess.run(
-        [str(binary), "--command", "extension", "validate", str(zip_path)],
+        [str(binary), "--factory-startup", "--command", "extension", "validate", str(zip_path)],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     output = (completed.stdout or "") + (completed.stderr or "")
     if completed.returncode != 0:

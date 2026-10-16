@@ -1,29 +1,25 @@
 [project]
-name = "motion2mixamorig"
-version = "0.1.5"
-description = "Retarget human motion from video or a still pose to an Adobe Mixamo-rigged 3D character."
+name = "video2vmd"
+version = "0.2.0"
+description = "Extract body motion from video or still images and export MMD VMD or BVH animation."
 requires-python = ">=3.11"
 dependencies = [
     "numpy",
     "opencv-python",
     "einops",
+    "scipy>=1.11",
+    "vmd2png @ git+https://github.com/alloystorm/vmd2png.git@3c8837e005456b7081bd1a1366aaa755eb0d0c5d",
     # Video -> 3D human skeleton. `preproc` = person detection/tracking,
     # `rtmpose` = the ungated 2D-pose backend the pipeline uses.
     "gvhmr[preproc,rtmpose]>=1.6",
 ]
 
-[project.optional-dependencies]
-mmd = [
-    "scipy>=1.11",
-    "vmd2png @ git+https://github.com/alloystorm/vmd2png.git@3c8837e005456b7081bd1a1366aaa755eb0d0c5d",
-]
-
 [project.scripts]
-m2mr = "motion2mixamorig.cli:main"
+v2vmd = "video2vmd.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["motion2mixamorig*"]
+include = ["video2vmd*"]

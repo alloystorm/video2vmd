@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
+- Renamed the command to `v2vmd`, and the Python package/distribution to `video2vmd`.
+- VMD is now the default; VMD codec support installs as a normal dependency.
+- Removed the legacy Mixamo/FBX retargeter, GLB renderer/exporter, `--rig`, and rig preflight checks.
+- Direct standard/PMX retargeting, optional foot cleanup/IK, BVH and canonical NPY export.
+- Raw and corrected VMD outputs, coherent neck/head mapping and independent playback checks.
+- Updated the Blender extension for VMD/BVH, optional PMX and cached skeletons.
+- Existing source skeleton NPZs remain compatible; local assets/outputs are retained.
+
+Older entries below describe the upstream v0.1.x project.
+
 ## [0.1.5] - 2026-10-15
 
 ### Added

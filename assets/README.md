@@ -1,19 +1,16 @@
-# assets
+# User assets
 
-Everything in this folder is supplied by you and is never committed to git
-(see the repository `.gitignore`). Licensing is why these cannot ship with the
-project: SMPL-X and Mixamo characters must be obtained under your own account.
+User-supplied models and media are gitignored. Run `v2vmd doctor` to check the
+extraction environment, or `v2vmd doctor --skeleton previous/skeleton_motion.npz`
+for cached-skeleton export.
 
-Run `m2mr doctor` at any time to check what is present and what is missing.
+| Path | Contents |
+| --- | --- |
+| `body_models/smplx/SMPLX_NEUTRAL.npz` | Licensed SMPL-X model from https://smpl-x.is.tue.mpg.de/; needed only for extraction |
+| `mmd/<character>.pmx` | Optional MMD target proportions; extract archives first and respect the model's license |
+| `video/<clip>.mp4` | Single-person video; `.mov`, `.avi`, `.mkv`, `.webm` also accepted |
+| `image/<pose>.jpg` | Single-person still; PNG/WebP/BMP also accepted |
 
-## What goes where
-
-| Path | What | Where to get it |
-| --- | --- | --- |
-| `body_models/smplx/SMPLX_NEUTRAL.npz` | SMPL-X neutral body model, needed to lift the video into a 3D skeleton | Register at <https://smpl-x.is.tue.mpg.de/>, download the model archive, copy `SMPLX_NEUTRAL.npz` here |
-| `mixamo/<Character>.fbx` | The character to drive, e.g. `Y_Bot.fbx` (the default) | <https://www.mixamo.com/> — pick a character, download as **FBX Binary**, **T-pose** |
-| `video/<your_clip>.mp4` | The video whose human motion you want to transfer | One clearly visible person only (`.mp4`, `.mov`, …). Group shots are rejected before extraction |
-| `image/<your_photo>.jpg` | A still whose pose you want to transfer | One clearly visible person (`.jpg`, `.png`, …). Group photos are rejected before extraction |
-
-`m2mr run` without flags uses the most recently added file in `video/` and
-`mixamo/Y_Bot.fbx`; use `--video` / `--image` / `--rig` to pick explicitly.
+Without an explicit input, `v2vmd run` picks the newest video, falling back to the
+newest image. The default target is the shared standard MMD skeleton. Reuse
+`--skeleton` to skip extraction; no source video or SMPL-X model is then needed.

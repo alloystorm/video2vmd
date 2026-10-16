@@ -1,116 +1,83 @@
 # AGENTS.md
 
-Motion2MixamoRig drives an Adobe Mixamo-rigged 3D character with human motion
-extracted from a monocular video, or a static 3D pose from a still photo.
-CLI: `m2mr`.
+Video2VMD extracts a 24-joint body skeleton from monocular video or a still and
+retargets it directly to MMD VMD or BVH. CLI: `v2vmd`; package: `video2vmd`.
 
 ## Setup
 
 ```bash
-# chumpy (legacy dep of gvhmr) breaks under PEP 517 build isolation
-# ("No module named 'pip'"); install it without isolation first.
-pip install --upgrade pip setuptools wheel \
-  && pip install "numpy>=1.26" \
-  && pip install --no-build-isolation "chumpy==0.70" \
-  && pip install -e .
+pip install --upgrade pip setuptools wheel
+pip install "numpy>=1.26"
+pip install --no-build-isolation "chumpy==0.70"
+pip install -e .
 ```
 
-These must be supplied by the user (all git-ignored, licensing-gated).
-A run needs SMPL-X, a Mixamo character, and either a video or a still:
-
-| What | Where to put it | Source |
-| --- | --- | --- |
-| SMPL-X body model | `assets/body_models/smplx/SMPLX_NEUTRAL.npz` | https://smpl-x.is.tue.mpg.de/ (registration) |
-| Mixamo character | `assets/mixamo/<Name>.fbx` (FBX Binary, T-pose) | https://www.mixamo.com/ (Adobe account) |
-| Input video | `assets/video/<name>.mp4` | one clearly visible person (group shots fail preflight) |
-| Input still | `assets/image/<name>.jpg` | one clearly visible person, head to toe (optional; `--image`) |
-
-Inference weights (~5 GB) auto-download into `weights/` on the first run.
+The VMD codec is a normal pinned dependency. PyTorch/GVHMR run in the user's
+external Python environment; CUDA-enabled PyTorch is needed for `--device cuda`.
+SMPL-X is user-supplied at `assets/body_models/smplx/SMPLX_NEUTRAL.npz`.
+PMX targets are optional (`assets/mmd/`); input media live in `assets/video/` and
+`assets/image/`. Inference weights auto-download to `weights/` on first extraction.
+All user assets and generated outputs remain gitignored.
 
 ## Commands
 
 ```bash
-m2mr doctor        # verify assets + dependencies; prints what is missing and where to get it
-m2mr run           # latest video in assets/video/ + assets/mixamo/Y_Bot.fbx
-m2mr run --video assets/video/dance.mp4 --rig assets/mixamo/Vampire.fbx
-m2mr run --image assets/image/pose.jpg --rig assets/mixamo/Y_Bot.fbx
-m2mr run --skeleton outputs/<run>/skeleton_motion.npz --rig ...   # reuse extraction, swap rig
-m2mr run --output-dir DIR --progress-jsonl FILE --no-preview      # Blender Extension / automation
+v2vmd doctor
+v2vmd run --video assets/video/dance.mp4 --device cuda --foot-lock
+v2vmd run --image assets/image/pose.jpg --model assets/mmd/character.pmx
+v2vmd doctor --skeleton outputs/<run>/skeleton_motion.npz
+v2vmd run --skeleton outputs/<run>/skeleton_motion.npz --model character.pmx --foot-lock
+v2vmd run --skeleton outputs/<run>/skeleton_motion.npz --format bvh --no-preview
+v2vmd run --output-dir DIR --progress-jsonl FILE --no-preview
 ```
 
-`--video` / `--image` and `--rig` combine freely (not `--video` with `--image`).
-Extraction is the slow step; reuse it with `--skeleton` when only the rig changes.
+VMD is the default; only VMD and BVH are supported. `--rig`/GLB and the legacy
+Mixamo code were removed. Cached-skeleton exports need no source video, SMPL-X,
+or inference weights. Extraction is expensive; reuse the NPZ when changing targets.
+`--ik-mode ik` requires a supported PMX and VMD output; baked FK is the default.
 
-## VMD / BVH export
+## Outputs and conventions
 
-Install `pip install -e ".[mmd]"` for the pinned shared VMD codec. Use
-`m2mr run --format vmd --skeleton outputs/<run>/skeleton_motion.npz --foot-lock`
-or `--format bvh`. `--model character.pmx` selects PMX proportions;
-`--ik-mode ik` adds supported PMX foot-IK controls to VMD (default: baked FK).
-These formats need no Mixamo rig. Cached-skeleton exports also need neither
-SMPL-X nor the source video. `--motion-encoder` adds a canonical 404-column NPY.
-VMD runs write `motion_raw.vmd` and `motion_corrected.vmd` (before/after optional
-foot cleanup); `motion.vmd` is an exact copy of the corrected file.
+- `motion_raw.vmd` / `motion_corrected.vmd`: before/after optional foot cleanup.
+- `motion.vmd`: exact corrected copy; BVH runs instead write `motion.bvh` and metadata.
+- `skeleton_motion.npz`: reusable 24 SMPL joints, Y-up meters.
+- `target_motion_raw.npz` / `target_motion.npz`: target hierarchy, meter offsets,
+  local xyzw quaternions, timestamps, profile hash and fitted-channel mask.
+- `contacts.npz`, `quality.json`, `run.json`, optional skeleton preview and
+  optional canonical 404-column `motion_encoder.npy`.
 
-Implementation: `motion2mixamorig/mmd/`. Usage and limits:
-[`docs/vmd-retargeting.md`](docs/vmd-retargeting.md). Verification:
-`python scripts/verify_mmd.py`; independent Blender import checks are documented
-in that guide. Keep finger/face channels neutral until a hand/face estimator is
-implemented. PMX files and generated validation outputs remain gitignored.
-
-## Blender Extension
-
-The add-on is a thin UI. It must **not** import PyTorch / GVHMR / OpenCV in
-Blender’s Python. It launches the user’s venv:
-
-```text
-<external-python> -m motion2mixamorig.cli run ...
-```
-
-How to install and use it (for the user, or to walk them through it):
-[`blender_extension/README.md`](blender_extension/README.md).
-
-When helping a user:
-
-1. They need the same venv + SMPL-X + Mixamo FBX as the CLI (see Setup above).
-2. Build `dist/motion2mixamorig-0.1.5.zip` with
-   `python scripts/package_blender_extension.py`.
-3. In Blender 4.2+: **Edit → Preferences → Get Extensions**, then the **∨**
-   next to Repositories → **Install from Disk…** (no large button). Enable it.
-4. The panel is **3D Viewport → N sidebar → Motion2MixamoRig**, not Get
-   Extensions. Setup is the first box: UI Language, External Python
-   (`.venv/bin/python` or `Scripts\python.exe`, not Blender’s interpreter),
-   Project Directory, Device, then **Check Environment**.
-5. After add-on **code** changes they must rebuild the zip and reinstall.
-   The installed copy is not live from this repo. If
-   `already registered` / `EnumProperty could not register` appears: disable,
-   **quit Blender fully**, reopen, install again.
-6. Jobs write `<project>/outputs/blender_jobs/<job-id>/`. After import, hide
-   **Icosphere** and the **armature** in the Outliner; leave **skinned_mesh**
-   visible. FPS must match the source clip duration (a 60 fps video tagged as
-   30 fps plays at half speed).
-
-Smoke-test checklist: [`docs/blender-extension.md`](docs/blender-extension.md).
-
-## Outputs
-
-Each run writes `outputs/<YYYYMMDD_HHMMSS>_<source>/`:
-
-- `run.json` — inputs, timings, output listing
-- `skeleton_motion.npz` — 3D human skeleton (24 SMPL joints, Y-up meters)
-- `mixamo_rotations.npz` — per-bone animation rotations (quaternion wxyz; convention string inside)
-- `mixamo_character.glb` — skinned character + clip (glTF 2.0; Blender: File → Import → glTF 2.0)
-- Video in: `videos/human_skeleton.mp4`, `videos/mixamo_skeleton.mp4`, `videos/mixamo_character.mp4`, `videos/compare.mp4` (2x2: original / mixamo skeleton / human skeleton / character)
-- Photo in: the same four views as PNG under `images/`, plus `images/before_after_360_compare.mp4` (left original / right 10° orbit of the rig)
+Keep fingers/face neutral until an observation backend exists. The neck uses a
+rest-relative chest-to-head axis; the head follows it without independent gaze
+tracking. Do not aim along SMPL's short skull-center offset. Keep source timing,
+coordinate bases, root ownership and quaternion conventions explicit.
 
 ## Code map
 
-- `motion2mixamorig/paths.py` — all filesystem locations
-- `motion2mixamorig/extract.py` — video or still -> 3D human skeleton (GVHMR)
-- `motion2mixamorig/mixamo/` — FBX parsing, FK, retargeting, skinning, rendering
-- `motion2mixamorig/pipeline.py` — one run end to end
-- `motion2mixamorig/cli.py` — `m2mr doctor` / `m2mr run`
-- `blender_extension/motion2mixamorig_blender/` — Blender 4.2+ Extension (UI + external process)
-- `blender_extension/README.md` — install and use the add-on
-- `docs/blender-extension.md` — maintainer smoke-test checklist
-- `scripts/package_blender_extension.py` — build `dist/motion2mixamorig-0.1.5.zip`
+- `video2vmd/cli.py`, `paths.py`: CLI, preflight and locations.
+- `video2vmd/extract.py`: GVHMR video/still extraction and input staging.
+- `video2vmd/mmd/`: profiles, body retargeting, contacts, export, preview, pipeline.
+- `blender_extension/video2vmd_blender/`: thin Blender UI and subprocess services.
+- `docs/vmd-retargeting.md`: format contract, controls and known limits.
+
+## Blender extension
+
+Must not import PyTorch/GVHMR/OpenCV into Blender's Python. Launch
+`<external-python> -m video2vmd.cli ...` with shell=False.
+Build `dist/video2vmd-0.2.0.zip` with `python scripts/package_blender_extension.py`.
+The ZIP has its manifest and __init__.py directly at root.
+
+Blender 4.2+: Preferences > Get Extensions > repository dropdown > Install from
+Disk. Enable Video2VMD; the panel is Viewport > N sidebar > Video2VMD. Configure
+External Python and Project Directory. VMD targets are optional PMX files; BVH
+imports a skeleton directly. VMD import needs MMD Tools and an active PMX armature.
+Jobs write `outputs/blender_jobs/<id>/`. Rebuild/reinstall after add-on changes.
+Disable the old extension first; quit/reopen Blender if old registrations persist.
+See `blender_extension/README.md` and `docs/blender-extension.md`.
+
+## Verification
+
+Run `python scripts/verify_mmd.py`, `python scripts/verify_video_input.py`, and
+`python scripts/verify_blender_extension.py`. Independent VMD/BVH import scripts
+run in fresh background Blender processes, never the user's open scene. Shared
+codec changes belong in the separate vmd2png repository; pin a published tested
+revision and leave the motion_encoder checkout unchanged.

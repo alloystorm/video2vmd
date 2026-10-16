@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "video2vmd"
+version = "0.2.0"
+name = "Video2VMD"
+tagline = "Extract body motion from video and export VMD or BVH"
+maintainer = "Alloystorm"
+type = "add-on"
+
+website = "https://github.com/alloystorm/video2vmd"
+tags = ["Animation", "Import-Export"]
+blender_version_min = "4.2.0"
+
+license = ["SPDX:Apache-2.0"]
+copyright = ["2026 Max Liu"]
+
+[permissions]
+files = "Read motion inputs and write job logs and VMD or BVH files"

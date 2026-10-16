@@ -17,8 +17,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from motion2mixamorig.extract import _stage_gvhmr_video
-from motion2mixamorig.paths import OUTPUTS, export_gvhmr_env
+from video2vmd.extract import _stage_gvhmr_video
+from video2vmd.paths import OUTPUTS, export_gvhmr_env
 
 export_gvhmr_env()
 
@@ -32,7 +32,7 @@ class VideoInputChecks(unittest.TestCase):
     def setUp(self):
         test_root = (OUTPUTS / "diagnostics").resolve()
         test_root.mkdir(parents=True, exist_ok=True)
-        self.temp = tempfile.TemporaryDirectory(prefix="m2mr-video-", dir=test_root)
+        self.temp = tempfile.TemporaryDirectory(prefix="v2vmd-video-", dir=test_root)
         self.root = Path(self.temp.name).resolve()
         assert self.root.is_relative_to(test_root)
         self.addCleanup(self.temp.cleanup)

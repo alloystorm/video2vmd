@@ -1,3 +1,5 @@
+> Historical upstream documentation (v0.1.x). For Video2VMD and the `v2vmd` command, see the [current guide](../../README.md).
+
 # Motion2MixamoRig
 
 <p align="center">

@@ -1,15 +1,15 @@
 # VMD and BVH body-motion export
 
-The CLI can retarget an extracted human skeleton directly to MMD bones and write
+`v2vmd` can retarget an extracted human skeleton directly to MMD bones and write
 VMD or BVH. It uses a canonical MMD A-pose or a supplied PMX skeleton's proportions.
-The existing Mixamo/GLB default and Blender extension keep their previous behavior.
+VMD is the default output; BVH is the alternative. The Blender extension launches the same external pipeline.
 
 ## Install and run
 
-Activate the project's Python environment, then install the optional format layer:
+Activate the project's Python environment, then install the format dependencies:
 
 ```powershell
-python -m pip install -e ".[mmd]"
+python -m pip install -e .
 ```
 
 This pins `alloystorm/vmd2png` at
@@ -19,22 +19,22 @@ dependency. Git must be available for the pinned dependency installation.
 
 ```powershell
 # Extract once, then write a standard-profile VMD.
-m2mr run --video assets/video/dance.mp4 --format vmd --device cuda --foot-lock
+v2vmd run --video assets/video/dance.mp4 --format vmd --device cuda --foot-lock
 
 # Reuse extraction with your PMX character. Extract ZIP archives first.
-m2mr run --skeleton outputs/previous/skeleton_motion.npz --format vmd --model assets/mmd/character.pmx --foot-lock
+v2vmd run --skeleton outputs/previous/skeleton_motion.npz --format vmd --model assets/mmd/character.pmx --foot-lock
 
 # Optional PMX foot-IK controls; baked FK is the default.
-m2mr run --skeleton outputs/previous/skeleton_motion.npz --format vmd --model assets/mmd/character.pmx --foot-lock --ik-mode ik
+v2vmd run --skeleton outputs/previous/skeleton_motion.npz --format vmd --model assets/mmd/character.pmx --foot-lock --ik-mode ik
 
 # BVH on the standard MMD hierarchy, without rendering a preview.
-m2mr run --skeleton outputs/previous/skeleton_motion.npz --format bvh --foot-lock --no-preview
+v2vmd run --skeleton outputs/previous/skeleton_motion.npz --format bvh --foot-lock --no-preview
 
 # Also produce the motion_encoder canonical 404-value representation.
-m2mr run --skeleton outputs/previous/skeleton_motion.npz --format vmd --motion-encoder
+v2vmd run --skeleton outputs/previous/skeleton_motion.npz --format vmd --motion-encoder
 ```
 
-VMD/BVH runs need no Mixamo FBX. Video/still extraction still needs the licensed
+Video/still extraction still needs the licensed
 SMPL-X model and existing inference weights. A cached-skeleton export needs neither
 SMPL-X nor the source video. `--image` also works through the existing still-hold
 extraction. `--output-dir` and `--progress-jsonl` work for automation.
@@ -148,7 +148,7 @@ python scripts/verify_mmd.py
 python scripts/verify_video_input.py
 ```
 
-Fourteen deterministic retarget/export/contact tests cover rest/asymmetric anatomy,
+Fifteen deterministic retarget/export/contact tests cover rest/asymmetric anatomy,
 root heading/travel, resampling/fractional FPS, planted feet, airborne preservation, encoder
 agreement, BVH timing, knee hinges, skull-center neck offsets, coherent upper-body
 lean, raw/corrected pipeline output and asset-independent skeleton preflight.
