@@ -77,3 +77,5 @@ def export_gvhmr_env() -> None:
     """
     os.environ.setdefault("GVHMR_CHECKPOINTS", str(WEIGHTS))
     os.environ.setdefault("GVHMR_BODY_MODELS", str(BODY_MODELS))
+    # rtmlib's RTMPose ONNX download uses TORCH_HOME, independently of GVHMR.
+    os.environ.setdefault("TORCH_HOME", str(WEIGHTS / "torch"))

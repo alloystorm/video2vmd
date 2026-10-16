@@ -53,6 +53,11 @@ Inference weights (GVHMR and so on) are not downloaded here. The first `m2mr run
 
 ffmpeg is recommended (macOS: `brew install ffmpeg`, Ubuntu: `apt install ffmpeg`).
 The pipeline runs without it, but the output videos will be **silent** and will not play in a browser.
+ffmpeg is required for inputs that need normalization before extraction: WebM,
+videos with missing frame-count metadata (including some AV1 MP4s), rotated phone
+recordings, and clips that need resampling to the model's 30 fps. Input names can
+contain spaces, punctuation, and non-ASCII characters; the pipeline stages a
+compatible video without renaming or modifying your original file.
 
 ## Before you run: put these in `assets/`
 

@@ -118,7 +118,7 @@ def doctor() -> int:
     _check(
         "ffmpeg (optional)  H.264 output with the source video's audio",
         _shutil.which("ffmpeg") is not None,
-        "brew install ffmpeg / apt install ffmpeg — runs fine without, but videos are silent mp4v",
+        "add ffmpeg to PATH — needed to normalize some inputs; otherwise previews are silent mp4v",
     )
 
     weights_note = (
@@ -361,6 +361,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    # Windows pipes can default to cp1252 even when the input paths contain
+    # Unicode. The Blender job log and progress files use UTF-8 as well.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = build_parser()
     args = parser.parse_args()
     if args.command == "doctor":

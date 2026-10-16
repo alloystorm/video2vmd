@@ -347,6 +347,85 @@ def _strip_cache_videos(root: Path) -> None:
             path.unlink(missing_ok=True)
 
 
+def _stage_gvhmr_video(video: Path, output_dir: Path, *, source_image: Path | None = None) -> Path:
+    """Give GVHMR a safe filename, known frame count, and its native 30 fps.
+
+    PyAV reports zero frames for some valid AV1 MP4s and WebMs. GVHMR uses
+    that metadata to allocate tensors and resample, so decoding successfully
+    in the OpenCV preflight is not sufficient. Stage with ffmpeg first rather
+    than letting GVHMR create an empty clip. Keep the original for previews
+    and for computing the animation's real duration.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    import av
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    staged = output_dir / "0_input_video.mp4"
+    manifest = output_dir / "input_source.json"
+    # Hold-video paths are temporary; image cache reuse tracks the real photo.
+    source = source_image if source_image is not None else video
+    stat = source.stat()
+    identity = {"path": str(source), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    if manifest.exists():
+        previous = json.loads(manifest.read_text(encoding="utf-8"))
+        if previous != identity:
+            raise ValueError("Extraction cache belongs to a different input; use a fresh work_dir")
+        if staged.exists() and staged.stat().st_size > 0:
+            with av.open(str(staged)) as container:
+                if container.streams.video[0].frames > 0:
+                    return staged
+
+    temporary = output_dir / "0_input_video.pending.mp4"
+    ffmpeg = shutil.which("ffmpeg")
+    try:
+        with av.open(str(video)) as container:
+            count = container.streams.video[0].frames
+        fps = video_native_fps(video)
+        from gvhmr.utils.video_io_utils import get_video_rotation
+
+        compatible = (
+            video.suffix.lower() == ".mp4" and count > 0 and fps is not None
+            and abs(fps - 30.0) <= 1.5 and get_video_rotation(video) == 0
+        )
+        if compatible:
+            # Already usable, including still-image hold clips: retain the
+            # source pixels and the documented ffmpeg-optional path.
+            shutil.copyfile(video, temporary)
+        elif ffmpeg is not None:
+            completed = subprocess.run(
+                [
+                    ffmpeg, "-y", "-loglevel", "error", "-i", str(video),
+                    "-map", "0:v:0", "-an", "-vf", "fps=30",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
+                    "-preset", "veryfast", "-movflags", "+faststart", str(temporary),
+                ],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(f"ffmpeg could not prepare {video.name}: {completed.stderr.strip()}")
+        else:
+            raise RuntimeError(
+                "Install ffmpeg and add it to PATH to prepare this video's frame count, "
+                "frame rate, or orientation for GVHMR"
+            )
+
+        with av.open(str(temporary)) as container:
+            if not container.streams.video or container.streams.video[0].frames <= 0:
+                raise RuntimeError(f"Prepared video has no readable frame count: {video.name}")
+        # A prior GVHMR run may have linked this path to the source. Unlink
+        # only the link, so we never overwrite the user's original video.
+        if staged.is_symlink():
+            staged.unlink()
+        temporary.replace(staged)
+        manifest.write_text(json.dumps(identity, ensure_ascii=False), encoding="utf-8")
+    finally:
+        temporary.unlink(missing_ok=True)
+    return staged
+
+
 def extract_motion(
     video: Path,
     output_npz: Path,
@@ -371,15 +450,30 @@ def extract_motion(
         raise FileNotFoundError(video)
 
     output_dir = Path(work_dir) / video.stem
+    prepared_video = _stage_gvhmr_video(video, output_dir, source_image=source_image)
+    intrinsics = next(
+        (p for ext in (".intrinsics.json", ".intrinsics.npz")
+         if (p := video.with_suffix(ext)).exists()),
+        None,
+    )
+
+    # GVHMR interpolates these arguments into Hydra overrides verbatim.
+    # Quote forward-slash paths so Unicode, punctuation, and Windows escapes
+    # cannot be interpreted as override syntax.
+    import json
+
+    def config_path(path: Path) -> str:
+        return json.dumps(path.resolve().as_posix(), ensure_ascii=False)
 
     def recover():
         return gvhmr.recover(
-            str(video),
+            str(prepared_video),
             static_camera=static_camera,
             device=device,
             pose2d="rtmpose",
-            output_dir=str(output_dir),
-            output_root=str(work_dir),
+            intrinsics=intrinsics,
+            output_dir=config_path(output_dir),
+            output_root=config_path(Path(work_dir)),
             progress=verbose,
         )
 
