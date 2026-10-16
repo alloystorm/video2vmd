@@ -56,6 +56,8 @@ class V2VMDProperties(PropertyGroup):
     )
     output_format: EnumProperty(name="Output Format", items=(("vmd", "VMD", ""), ("bvh", "BVH", "")), default="vmd")
     foot_lock: BoolProperty(name="Foot Contact Cleanup", default=False)
+    depth_cleanup: BoolProperty(name="Root Depth Cleanup",default=False,
+        description="Reduce root-depth jitter using saved static-camera observations; preserves raw exports")
     ik_mode: EnumProperty(name="VMD Leg Mode", items=(("fk", "Baked FK", ""), ("ik", "PMX Foot IK", "")), default="fk")
     device: EnumProperty(
         name="Device",

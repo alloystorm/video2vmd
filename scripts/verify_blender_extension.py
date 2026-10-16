@@ -46,14 +46,14 @@ class ExtensionTests(unittest.TestCase):
             for output_format in ("vmd", "bvh"):
                 with self.subTest(source_type=source_type, output_format=output_format):
                     argv = self.backend.build_run_argv("python with spaces.exe", source_type=source_type,
-                            source="source with spaces.npz", model="optional model.pmx", foot_lock=True,
+                            source="source with spaces.npz", model="optional model.pmx", foot_lock=True,depth_cleanup=True,
                             output_format=output_format, device="cuda", output_dir=self.root,
                             progress_jsonl=self.root/"progress.jsonl", preview=False)
                     self.assertEqual(argv[1:3], ["-m", "video2vmd.cli"])
                     args = build_parser().parse_args(argv[3:])
                     self.assertEqual(args.format, output_format)
                     self.assertEqual(getattr(args, source_type), "source with spaces.npz")
-                    self.assertTrue(args.foot_lock and args.no_preview)
+                    self.assertTrue(args.foot_lock and args.depth_cleanup and args.no_preview)
                     self.assertNotIn("--rig", argv)
         args = self.backend.build_doctor_argv("python.exe", "cached.npz")
         self.assertEqual(args[-2:], ["--skeleton", "cached.npz"])
@@ -120,6 +120,7 @@ def blender_smoke():
     addon.register()
     assert hasattr(bpy.types.Scene,"v2vmd")
     assert bpy.context.scene.v2vmd.output_format == "vmd"
+    assert bpy.context.scene.v2vmd.depth_cleanup is False
     assert not hasattr(bpy.context.scene.v2vmd,"rig_path")
     # Exercise the actual external-process/report handoff with no target model.
     from video2vmd_blender.services.backend import build_run_argv, launch_process, subprocess_env

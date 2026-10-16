@@ -50,6 +50,7 @@ def build_run_argv(
     model: str | Path = "",
     output_format: str = "vmd",
     foot_lock: bool = False,
+    depth_cleanup: bool = False,
     ik_mode: str = "fk",
     device: str,
     output_dir: str | Path,
@@ -88,6 +89,8 @@ def build_run_argv(
         cmd.extend(["--model", os.fspath(as_user_path(model))])
     if foot_lock:
         cmd.append("--foot-lock")
+    if depth_cleanup:
+        cmd.append("--depth-cleanup")
     if not preview:
         cmd.append("--no-preview")
     return cmd

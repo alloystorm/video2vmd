@@ -387,6 +387,7 @@ _ENV_KEYS = {
 _add("mmd_model", en="PMX Target (optional)")
 _add("output_format", en="Output Format")
 _add("foot_lock", en="Foot Contact Cleanup")
+_add("depth_cleanup",en="Root Depth Cleanup")
 _add("ik_mode", en="VMD Leg Mode")
 _add("source_skeleton", en="Cached Skeleton")
 _add("source_skeleton_desc", en="Reuse skeleton_motion.npz without extraction")

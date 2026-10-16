@@ -54,6 +54,7 @@ class V2VMD_PT_main(Panel):
         box.prop(props, "model_path", text=t("mmd_model"))
         box.prop(props, "output_format", text=t("output_format"))
         box.prop(props, "foot_lock", text=t("foot_lock"))
+        box.prop(props, "depth_cleanup", text=t("depth_cleanup"))
         if props.output_format == "vmd":
             box.prop(props, "ik_mode", text=t("ik_mode"))
         box.prop(props, "generate_preview", text=t("generate_preview"))

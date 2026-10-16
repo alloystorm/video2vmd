@@ -60,6 +60,7 @@ class V2VMD_OT_run_pipeline(Operator):
             model=props.model_path,
             output_format=props.output_format,
             foot_lock=bool(props.foot_lock),
+            depth_cleanup=bool(props.depth_cleanup),
             ik_mode=props.ik_mode if props.output_format == "vmd" else "fk",
             device=props.device,
             output_dir=output_dir,

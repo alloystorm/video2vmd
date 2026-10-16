@@ -25,6 +25,10 @@ Motion launches `<external-python> -m video2vmd.cli run ...` and streams progres
 Jobs write `outputs/blender_jobs/<job-id>/` including a log and run.json.
 
 VMD runs write raw and corrected files; `motion.vmd` is the corrected copy.
+**Root Depth Cleanup** optionally reduces static-camera root-depth jitter before
+**Foot Contact Cleanup**. It needs camera observations from a recent extraction;
+older cached skeletons may need the camera-cache upgrade script. Rebuild/reinstall
+the extension ZIP to see the new checkbox.
 VMD export succeeds without any Blender MMD plugin. To import it, enable
 [MMD Tools](https://github.com/MMD-Blender/blender_mmd_tools), load your PMX at
 scale 0.085, select its armature and press Import Motion. This applies the

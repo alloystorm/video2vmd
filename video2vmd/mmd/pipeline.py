@@ -22,7 +22,7 @@ from .export import write_bvh, write_motion_encoder, write_vmd
 
 def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=None,
                      device="cpu", output_format="vmd", model=None, foot_lock=False,
-                     floor=None, motion_encoder=False, no_preview=False, progress=None, ik_mode="fk"):
+                     floor=None, motion_encoder=False, no_preview=False, progress=None, ik_mode="fk", depth_cleanup=False):
     started, clock = datetime.now(), time.monotonic()
     source = Path(image or video or skeleton_npz).resolve()
     run_dir = Path(output_dir).resolve() if output_dir else paths.new_run_dir(source, started)
@@ -52,7 +52,25 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
             raw = constrain_ik_knees(raw)
         contacts = detect_contacts(raw, floor=floor)
         before = quality(raw, contacts)
-        corrected, correction = correct_feet(raw, contacts) if foot_lock else (raw, {"corrected_frames": 0})
+        base=raw
+        depth_report={"enabled": False}
+        depth_outputs={}
+        if depth_cleanup:
+            from ..depth_cleanup import clean_skeleton
+            stage="depth_cleanup"
+            writer.emit(stage,.65,"Regularizing root depth with contact and reprojection guards")
+            cleaned_path=run_dir/"skeleton_motion_corrected.npz"
+            human,diagnostics,depth_report=clean_skeleton(motion_npz,cleaned_path,contacts=contacts)
+            depth_report["enabled"]=True
+            np.savez_compressed(run_dir/"depth_cleanup.npz",**diagnostics)
+            (run_dir/"depth_cleanup.json").write_text(json.dumps(depth_report,indent=2)+"\n",encoding="utf-8")
+            base,_=retarget(human,profile)
+            if ik_mode=="ik":
+                base=constrain_ik_knees(base)
+            base.save(run_dir/"target_motion_depth.npz")
+            depth_outputs={"skeleton_motion_corrected":cleaned_path.name,"depth_cleanup":"depth_cleanup.json",
+                           "depth_cleanup_evidence":"depth_cleanup.npz","target_motion_depth":"target_motion_depth.npz"}
+        corrected, correction = correct_feet(base, contacts) if foot_lock else (base, {"corrected_frames": 0})
         if ik_mode == "ik" and foot_lock:
             corrected = constrain_ik_knees(corrected)
         correction["max_root_correction_m"] = float(np.linalg.norm(corrected.translations-raw.translations, axis=2).max())
@@ -60,7 +78,8 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
         raw.save(run_dir/"target_motion_raw.npz")
         corrected.save(run_dir/"target_motion.npz")
         np.savez_compressed(run_dir/"contacts.npz", **contacts)
-        metrics = {"before": before, "after": after, "correction": correction,
+        metrics = {"before": before, "after_depth_cleanup":quality(base,contacts), "after": after, "correction": correction,
+                   "depth_cleanup":depth_report,
                    "floor_m": contacts["floor_m"], "foot_lock": foot_lock,
                    "contact_policy": {key: contacts[key] for key in
                                       ("height_threshold_m", "speed_threshold_m_s", "minimum_dwell_s")}}
@@ -78,6 +97,7 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
         outputs = {"motion": output.name, "skeleton_motion": motion_npz.name,
                    "target_motion_raw": "target_motion_raw.npz", "target_motion": "target_motion.npz",
                    "contacts": "contacts.npz", "quality": "quality.json"}
+        outputs.update(depth_outputs)
         if output_format == "vmd":
             outputs.update(motion_raw="motion_raw.vmd", motion_corrected="motion_corrected.vmd")
         if output_format == "bvh":
@@ -101,6 +121,7 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
                                 "model": str(Path(model).resolve()) if model else None,
                                 "source": str(source), "skeleton_reused_from": str(skeleton_npz) if skeleton_npz else None,
                                 "device": device, "fps": corrected.fps, "n_frames": corrected.n_frames,
+                                "depth_cleanup":depth_report,
                                 "units": "meters", "calibration": calibration, "outputs": outputs})
         writer.emit("done", 1., "Completed")
         print(f"saved {output} ({corrected.n_frames} frames at {corrected.fps:g} fps)")

@@ -25,6 +25,7 @@ All user assets and generated outputs remain gitignored.
 v2vmd doctor
 v2vmd run --video assets/video/dance.mp4 --device cuda --foot-lock
 v2vmd run assets/video/dance.mp4 --device cuda --foot-lock --inspect
+v2vmd run assets/video/dance.mp4 --device cuda --depth-cleanup --foot-lock --inspect
 v2vmd inspect outputs/<run>  # reopen saved motion + original video in a local browser
 v2vmd run --image assets/image/pose.jpg --model assets/mmd/character.pmx
 v2vmd doctor --skeleton outputs/<run>/skeleton_motion.npz
@@ -40,7 +41,7 @@ or inference weights. Extraction is expensive; reuse the NPZ when changing targe
 
 ## Outputs and conventions
 
-- `motion_raw.vmd` / `motion_corrected.vmd`: before/after optional foot cleanup.
+- `motion_raw.vmd` / `motion_corrected.vmd`: before/after optional depth + foot cleanup.
 - `motion.vmd`: exact corrected copy; BVH runs instead write `motion.bvh` and metadata.
 - `skeleton_motion.npz`: reusable 24 SMPL joints, Y-up meters.
   New extractions also save `camera_joints_3d` (OpenCV camera coordinates),
@@ -50,6 +51,8 @@ or inference weights. Extraction is expensive; reuse the NPZ when changing targe
   local xyzw quaternions, timestamps, profile hash and fitted-channel mask.
 - `contacts.npz`, `quality.json`, `run.json`, optional skeleton preview and
   optional canonical 404-column `motion_encoder.npy`.
+- With `--depth-cleanup`: `skeleton_motion_corrected.npz`, `target_motion_depth.npz`,
+  and `depth_cleanup.json` / `.npz`. Preserve original source and raw exports.
 
 Keep fingers/face neutral until an observation backend exists. The neck uses a
 rest-relative chest-to-head axis; the head follows it without independent gaze
@@ -60,6 +63,9 @@ coordinate bases, root ownership and quaternion conventions explicit.
 
 - `video2vmd/cli.py`, `paths.py`: CLI, preflight and locations.
 - `video2vmd/extract.py`: GVHMR video/still extraction and input staging.
+- `video2vmd/depth_cleanup.py`: optional static-camera metric root-depth regularizer.
+  Translate all joints together, preserve timestamps/articulation, protect coherent
+  motion, bound reprojection, and evaluate all stages on the same raw contact mask.
 - `video2vmd/mmd/`: profiles, body retargeting, contacts, export, preview, pipeline.
 - `video2vmd/inspection/`: localhost viewer, source proxy, HTTP byte ranges,
   raw/corrected FK buffers, estimated/manual camera overlap and video-clock-driven
@@ -93,5 +99,6 @@ codec changes belong in the separate vmd2png repository; pin a published tested
 revision and leave the motion_encoder checkout unchanged.
 
 Run `node scripts/verify_inspection_projection.cjs` for overlap projection changes.
+Run `python scripts/verify_depth_cleanup.py` for depth-cleanup or related pipeline changes.
 `scripts/cache_inspection_camera.py` can add camera arrays to an older run using
 its matching trusted local GVHMR cache; it needs SMPL-X but does not rerun inference.

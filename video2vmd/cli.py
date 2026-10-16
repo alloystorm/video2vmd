@@ -230,6 +230,9 @@ def preflight(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path 
             "check the --skeleton path (a previous run's skeleton_motion.npz)",
         )
         check_content(f"skeleton loads     {skeleton.name}", skeleton, checks.check_skeleton_npz)
+        if getattr(args,"depth_cleanup",False):
+            from .depth_cleanup import check_depth_input
+            check_content("depth cleanup camera observations",skeleton,check_depth_input)
     else:
         check(
             f"SMPL-X body model  {paths.SMPLX_NEUTRAL.relative_to(paths.PROJECT_ROOT)}",
@@ -274,7 +277,8 @@ def run(args: argparse.Namespace) -> int:
         run_dir = run_mmd_pipeline(video, image=image, skeleton_npz=skeleton, output_dir=output_dir,
                                   device=args.device, output_format=args.format, model=args.model,
                                   foot_lock=args.foot_lock, floor=args.floor, motion_encoder=args.motion_encoder,
-                                  no_preview=args.no_preview, progress=progress, ik_mode=args.ik_mode)
+                                  no_preview=args.no_preview, progress=progress, ik_mode=args.ik_mode,
+                                  depth_cleanup=getattr(args,"depth_cleanup",False))
     except Exception:
         import traceback
 
@@ -329,6 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--mmd-profile", choices=["standard"], default="standard", help="MMD reference skeleton")
     p_run.add_argument("--model", help="PMX target skeleton/proportions for VMD/BVH (default: standard profile)")
     p_run.add_argument("--foot-lock", action="store_true", help="bake temporal foot-contact correction into VMD/BVH")
+    p_run.add_argument("--depth-cleanup",action="store_true",help="adaptively reduce root-depth jitter using saved static-camera observations; preserves raw exports")
     p_run.add_argument("--ik-mode", choices=["fk", "ik"], default="fk", help="VMD baked FK or PMX foot-IK controls (default: fk)")
     p_run.add_argument("--floor", type=float, help="target floor height in meters (default: estimated)")
     p_run.add_argument("--motion-encoder", action="store_true", help="also write canonical 404-column motion_encoder.npy")

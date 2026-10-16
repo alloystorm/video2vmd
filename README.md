@@ -50,6 +50,7 @@ User assets and generated outputs are gitignored. See [asset locations](assets/R
 v2vmd doctor
 v2vmd run --video assets/video/dance.mp4 --device cuda --foot-lock
 v2vmd run assets/video/dance.mp4 --device cuda --foot-lock --inspect
+v2vmd run assets/video/dance.mp4 --device cuda --depth-cleanup --foot-lock --inspect
 v2vmd run --image assets/image/pose.jpg --model assets/mmd/character.pmx
 
 # Reuse extraction and change the target quickly.
@@ -67,15 +68,28 @@ to `assets/image/`. `--video` and `--image` are mutually exclusive. Use
 `python -m video2vmd` (or `python -m video2vmd.cli`).
 
 Each VMD run writes `motion_raw.vmd` and `motion_corrected.vmd`; `motion.vmd` is
-an exact copy of the corrected file. Raw means before optional foot cleanup;
-both use the same retargeting and neck mapping. Without `--foot-lock`, they are
-identical. Runs also save reusable skeletons, target motion, contact evidence,
+an exact copy of the corrected file. Raw means before optional depth and foot
+cleanup; both use the same retargeting and neck mapping. With both cleanup
+options disabled, they are identical. Runs also save reusable skeletons, target motion, contact evidence,
 quality metrics and a front/side skeleton preview. Default output directory:
 `outputs/<timestamp>_<source>/`.
 
 See [format conventions, IK mode and quality limits](docs/vmd-retargeting.md).
 Foot cleanup is conservative. Fingers, face, gaze and secondary animation are
 not captured; head orientation follows a coarse fitted neck axis.
+
+`--depth-cleanup` enables conservative root-depth regularization for static-camera
+extractions. It works on combined metric depth, protects coherent movement, uses
+foot-contact evidence, and bounds changes by video reprojection. Local body pose
+and timing are preserved. Pair it with `--foot-lock` to maintain planted feet.
+It requires the saved camera arrays from a recent extraction (older caches can
+be upgraded with `scripts/cache_inspection_camera.py`, described below).
+
+The original `skeleton_motion.npz` and raw VMD stay untouched. Additional files
+are `skeleton_motion_corrected.npz`, `target_motion_depth.npz` (before foot lock),
+and `depth_cleanup.json` / `.npz` with metrics and per-frame corrections. Quality
+reports compare raw, depth-cleaned, and final motion on the same contact samples.
+Cleanup is opt-in: genuine fast motion can occupy the same frequency band as jitter.
 
 ## Motion inspector
 
@@ -140,6 +154,7 @@ python scripts/verify_mmd.py
 python scripts/verify_video_input.py
 python scripts/verify_blender_extension.py
 python scripts/verify_inspection.py
+python scripts/verify_depth_cleanup.py
 node scripts/verify_inspection_projection.cjs
 python scripts/package_blender_extension.py
 ```

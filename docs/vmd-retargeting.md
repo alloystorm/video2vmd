@@ -50,10 +50,10 @@ Each run writes:
 | File | Contents |
 | --- | --- |
 | `motion.vmd` or `motion.bvh` | Dense 30 fps body animation |
-| `motion_raw.vmd` / `motion_corrected.vmd` | VMD before and after optional foot-contact cleanup; both always written for VMD runs |
+| `motion_raw.vmd` / `motion_corrected.vmd` | VMD before and after optional depth/contact cleanup; both always written for VMD runs |
 | `skeleton_motion.npz` | Reusable source human joints |
 | `target_motion.npz` | Version 1 target hierarchy, rest positions, local `xyzw` quaternions, animated local translations, timestamps, profile hash and fitted-channel mask |
-| `target_motion_raw.npz` | Matching target motion before foot-contact cleanup |
+| `target_motion_raw.npz` | Matching target motion before depth/contact cleanup |
 | `contacts.npz` | Heel/toe contact mask, persistent anchors, transition weights, floor and thresholds; per-foot support codes 0=swing/unknown, 1=heel, 2=toe, 3=both |
 | `quality.json` | Before/after contact speed, anchor error, penetration, root travel, body jerk and reach residuals |
 | `run.json` | Inputs, format, profile identity, codec version/pin, calibration, timing and output listing |
@@ -61,8 +61,8 @@ Each run writes:
 | `motion_encoder.npy` | Optional canonical 404-column array |
 
 `motion.vmd` remains an exact copy of `motion_corrected.vmd` for existing consumers.
-Without `--foot-lock`, raw and corrected VMD files are identical. Both use the
-same retargeting, neck mapping and selected FK/IK mode; "raw" means before foot
+With both `--depth-cleanup` and `--foot-lock` disabled, raw and corrected VMD files are identical. Both use the
+same retargeting, neck mapping and selected FK/IK mode; "raw" means before optional
 cleanup, not the original human skeleton or an older retargeter. In IK mode,
 both variants include the necessary PMX knee-hinge compatibility conversion.
 
@@ -108,6 +108,29 @@ outside the body root tree, such as disconnected PMX IK controllers. Animated
 controls outside that tree cause an error instead of being silently lost.
 
 ## Foot cleanup and PMX compatibility
+
+`--depth-cleanup` optionally regularizes the source pelvis's combined metric
+camera depth before producing the corrected target. Raw extraction/retargeting
+stay intact. It requires static-camera observations in the source NPZ; the CLI
+gives upgrade instructions for older caches. It does not filter bounding-box
+size or weak-perspective camera scale independently.
+
+The offline sparse least-squares regularizer combines a data term, adaptive
+acceleration penalty (3 Hz base), and supported-foot horizontal velocity evidence.
+Coherent travel reduces smoothing. A shared translation along the pelvis viewing
+ray preserves its image position and all joint-relative vectors; world changes
+use the saved camera rotation. Edits taper to zero at clip endpoints, are capped
+at 4 cm in depth, and stay within 0.1% image-height RMS / 0.2% maximum per-joint
+reprojection displacement. These are displacement budgets, not ground-truth error.
+
+`skeleton_motion_corrected.npz` retains camera observations with the corrected
+joint translations; `target_motion_depth.npz` captures the stage before foot lock.
+`depth_cleanup.json` and `.npz` record actual edits, reprojection and motion/contact
+weights. Refiltering an already cleaned skeleton is rejected; use the original
+cache when comparing settings. `--depth-cleanup --foot-lock` applies the existing
+leg correction after depth cleanup, using the original contact evidence. Quality
+reports keep that mask fixed across raw/depth/final stages. Real fast movement
+can still be attenuated, so the option defaults off and needs inspection.
 
 Contact detection requires a heel/toe proxy within 3.5 cm of the floor, moving
 slower than 0.35 m/s for at least 0.1 seconds. Each interval gets a persistent
