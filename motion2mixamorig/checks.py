@@ -40,7 +40,10 @@ def _person_detector():
 
     export_gvhmr_env()
     ckpt = WEIGHTS / "yolo" / "yolov8x.pt"
-    _yolo = YOLO(str(ckpt) if ckpt.exists() else "yolov8n.pt")
+    if not ckpt.exists():
+        ckpt = WEIGHTS / "yolo" / "yolov8n.pt"
+    ckpt.parent.mkdir(parents=True, exist_ok=True)
+    _yolo = YOLO(str(ckpt))
     return _yolo
 
 
