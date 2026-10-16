@@ -20,6 +20,11 @@ For game developers: give it a **single-person** action video (or a still) and a
 
 Agents should start with [`AGENTS.md`](AGENTS.md).
 
+This fork also supports direct **VMD and BVH body-motion export**, PMX target
+proportions, optional foot locking, and canonical `motion_encoder` NPY output.
+See [VMD/BVH setup, commands and limitations](docs/vmd-retargeting.md).
+These exports need no Mixamo rig; cached-skeleton exports also need no SMPL-X.
+
 https://github.com/user-attachments/assets/37c67642-f36c-4815-bcf3-028ed9546a2f
 
 <p align="center">
@@ -35,8 +40,8 @@ https://github.com/user-attachments/assets/073f20c8-7283-4209-98e8-f247228bfd56
 Python 3.11+. After cloning, create a virtualenv and install dependencies; the `m2mr` command is then available:
 
 ```bash
-git clone https://github.com/MaxLiu22/Motion2MixamoRig.git
-cd Motion2MixamoRig
+git clone https://github.com/alloystorm/video2vmd.git
+cd video2vmd
 python -m venv .venv && source .venv/bin/activate
 
 # Install dependencies and this project. chumpy (a legacy package on the
@@ -61,7 +66,7 @@ compatible video without renaming or modifying your original file.
 
 ## Before you run: put these in `assets/`
 
-This repository does not ship these files; you have to fetch them. The SMPL-X filename must match the table exactly; FBX, video, and image names can be anything. A run needs SMPL-X, a Mixamo character, and **either** a video **or** a still.
+This repository does not ship these files; you have to fetch them. The SMPL-X filename must match the table exactly; FBX, video, and image names can be anything. A GLB run needs SMPL-X, a Mixamo character, and **either** a video **or** a still. VMD/BVH requirements are described in the [format guide](docs/vmd-retargeting.md).
 
 | What | Where | Where to get it |
 |---|---|---|

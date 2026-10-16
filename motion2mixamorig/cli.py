@@ -133,7 +133,7 @@ def doctor() -> int:
     return 1
 
 
-def preflight(args: argparse.Namespace) -> tuple[Path | None, Path, Path | None, Path | None]:
+def preflight(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | None, Path | None]:
     """Resolve run inputs, checking everything doctor checks for this run.
 
     All problems are collected and reported together (same format as doctor)
@@ -156,10 +156,18 @@ def preflight(args: argparse.Namespace) -> tuple[Path | None, Path, Path | None,
 
     video: Path | None = None
     image: Path | None = None
+    output_format = getattr(args, "format", "glb")
+    mmd = output_format in ("vmd", "bvh")
+    if getattr(args, "floor", None) is not None:
+        import math
+        check("floor height", math.isfinite(args.floor), "--floor must be a finite number in meters")
+    skeleton_only = mmd and bool(args.skeleton) and not args.video and getattr(args, "image", None) is None
     want_image = getattr(args, "image", None) is not None
     want_video = bool(getattr(args, "video", None))
 
-    if want_image and want_video:
+    if skeleton_only:
+        pass  # Motion-only export needs no video, SMPL-X, or Mixamo assets.
+    elif want_image and want_video:
         check(
             "input source       --video / --image",
             False,
@@ -217,7 +225,23 @@ def preflight(args: argparse.Namespace) -> tuple[Path | None, Path, Path | None,
             check_content(f"video is usable    {video.name}", video, checks.check_video)
 
     # Rig: --rig wins, else Y_Bot.fbx, else the first .fbx in assets/mixamo/.
-    if args.rig:
+    if mmd:
+        rig = None
+        if args.rig:
+            check("target rig", False, "--rig is for GLB; use --model character.pmx for VMD/BVH")
+        try:
+            from .mmd.profile import require_codec
+            require_codec()
+        except ImportError as exc:
+            check("MMD dependencies", False, str(exc))
+        model = getattr(args, "model", None)
+        if model:
+            check(f"PMX model          {model}", Path(model).is_file() and Path(model).suffix.lower() == ".pmx",
+                  "use a readable .pmx file (extract ZIP archives first)")
+        if getattr(args, "ik_mode", "fk") == "ik":
+            check("IK target profile", output_format == "vmd" and bool(model),
+                  "--ik-mode ik requires --format vmd and --model character.pmx")
+    elif args.rig:
         rig = Path(args.rig)
         check(f"Mixamo rig .fbx    {rig}", rig.exists(), "check the --rig path")
     else:
@@ -231,6 +255,9 @@ def preflight(args: argparse.Namespace) -> tuple[Path | None, Path, Path | None,
             RIG_HINT + ", or pass --rig",
         )
     check_content(f"rig is Mixamo      {rig.name if rig else ''}", rig, checks.check_rig)
+    if not mmd and (getattr(args, "model", None) or getattr(args, "foot_lock", False) or getattr(args, "motion_encoder", False)
+                    or getattr(args, "floor", None) is not None or getattr(args, "ik_mode", "fk") != "fk"):
+        check("target options", False, "--model, --foot-lock and --motion-encoder require --format vmd or bvh")
 
     # Skeleton reuse skips extraction; only then is SMPL-X not needed.
     skeleton = Path(args.skeleton) if args.skeleton else None
@@ -280,26 +307,31 @@ def run(args: argparse.Namespace) -> int:
 
     print()
 
-    from .pipeline import run_pipeline
-
     try:
-        run_dir = run_pipeline(
-            video,
-            rig,
-            image=image,
-            device=args.device,
-            skeleton_npz=skeleton,
-            output_dir=output_dir,
-            progress=progress,
-            no_preview=bool(getattr(args, "no_preview", False)),
-        )
+        if getattr(args, "format", "glb") in ("vmd", "bvh"):
+            from .mmd.pipeline import run_mmd_pipeline
+            run_dir = run_mmd_pipeline(video, image=image, skeleton_npz=skeleton, output_dir=output_dir,
+                                       device=args.device, output_format=args.format, model=args.model,
+                                       foot_lock=args.foot_lock, floor=args.floor, motion_encoder=args.motion_encoder,
+                                       no_preview=args.no_preview, progress=progress, ik_mode=args.ik_mode)
+        else:
+            from .pipeline import run_pipeline
+            run_dir = run_pipeline(
+                video,
+                rig,
+                image=image,
+                device=args.device,
+                skeleton_npz=skeleton,
+                output_dir=output_dir,
+                progress=progress,
+                no_preview=bool(getattr(args, "no_preview", False)),
+            )
     except Exception:
         import traceback
 
         traceback.print_exc()
         return 1
-    preview = "images" if image is not None else "videos"
-    print(f"\nresults: {run_dir / preview}")
+    print(f"\nresults: {run_dir}")
     return 0
 
 
@@ -315,7 +347,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="check assets, weights and dependencies")
 
-    p_run = sub.add_parser("run", help="video or still -> Mixamo rig, results in outputs/")
+    p_run = sub.add_parser("run", help="video, still or cached skeleton -> GLB/VMD/BVH, results in outputs/")
+    p_run.add_argument("--format", choices=["glb", "vmd", "bvh"], default="glb", help="output format (default: glb)")
+    p_run.add_argument("--mmd-profile", choices=["standard"], default="standard", help="MMD reference skeleton")
+    p_run.add_argument("--model", help="PMX target skeleton/proportions for VMD/BVH (default: standard profile)")
+    p_run.add_argument("--foot-lock", action="store_true", help="bake temporal foot-contact correction into VMD/BVH")
+    p_run.add_argument("--ik-mode", choices=["fk", "ik"], default="fk", help="VMD baked FK or PMX foot-IK controls (default: fk)")
+    p_run.add_argument("--floor", type=float, help="target floor height in meters (default: estimated)")
+    p_run.add_argument("--motion-encoder", action="store_true", help="also write canonical 404-column motion_encoder.npy")
     p_run.add_argument(
         "--video",
         help="input video (default: the file most recently added to assets/video/)",
@@ -355,7 +394,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--no-preview",
         action="store_true",
-        help="skip preview videos/images; still write NPZ, GLB, and run.json",
+        help="skip preview videos/images; still write motion files, NPZ and run.json",
     )
     return parser
 

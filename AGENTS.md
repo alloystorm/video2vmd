@@ -41,6 +41,21 @@ m2mr run --output-dir DIR --progress-jsonl FILE --no-preview      # Blender Exte
 `--video` / `--image` and `--rig` combine freely (not `--video` with `--image`).
 Extraction is the slow step; reuse it with `--skeleton` when only the rig changes.
 
+## VMD / BVH export
+
+Install `pip install -e ".[mmd]"` for the pinned shared VMD codec. Use
+`m2mr run --format vmd --skeleton outputs/<run>/skeleton_motion.npz --foot-lock`
+or `--format bvh`. `--model character.pmx` selects PMX proportions;
+`--ik-mode ik` adds supported PMX foot-IK controls to VMD (default: baked FK).
+These formats need no Mixamo rig. Cached-skeleton exports also need neither
+SMPL-X nor the source video. `--motion-encoder` adds a canonical 404-column NPY.
+
+Implementation: `motion2mixamorig/mmd/`. Usage and limits:
+[`docs/vmd-retargeting.md`](docs/vmd-retargeting.md). Verification:
+`python scripts/verify_mmd.py`; independent Blender import checks are documented
+in that guide. Keep finger/face channels neutral until a hand/face estimator is
+implemented. PMX files and generated validation outputs remain gitignored.
+
 ## Blender Extension
 
 The add-on is a thin UI. It must **not** import PyTorch / GVHMR / OpenCV in
