@@ -164,9 +164,7 @@ occlusion and pivot footage still needs review before stronger quality claims.
 
 Shared codec development is isolated on `codex/vmd-retargeting` in a separate git
 worktree at `outputs/worktrees/vmd2png`; the motion_encoder submodule checkout was
-left untouched. A built local codec wheel is also available under
-`dist/dependencies/`; this workspace's `.venv` uses the installed wheel. If the
-pinned commit has not been published yet, install that
-local checkout with `pip install --no-deps ./outputs/worktrees/vmd2png`, then
-`pip install --no-deps -e .`. Publishing the shared branch is required for clean
-GitHub installations of `.[mmd]`.
+left untouched. That branch is published in `alloystorm/vmd2png`, and installation
+of the exact pinned GitHub commit has been verified in this workspace's `.venv`.
+A built local codec wheel is also available under `dist/dependencies/`. The local
+worktree is only needed for further codec development, not normal runtime use.
