@@ -17,7 +17,9 @@ def write_vmd(path, motion, ik_mode="fk"):
     frames = []
     for i, name in enumerate(profile.names):
         moving = np.any(np.abs(motion.rotations[:, i, :3]) > 1e-8) or np.any(np.abs(motion.translations[:, i]) > 1e-8)
-        if not moving and name != profile.root:
+        # Explicit neutral Head keys also replace an older counter-rotation
+        # when this motion is loaded onto an already animated character.
+        if not moving and name not in (profile.root, "Head"):
             continue
         if name not in profile.serialized:
             raise ValueError(f"Animated helper {name} has no VMD mapping; compose it into a supported control first")

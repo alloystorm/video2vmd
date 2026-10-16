@@ -3,6 +3,7 @@
 Run with the project's mmd extra installed: python scripts/verify_mmd.py
 """
 import argparse
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -23,6 +24,7 @@ from motion2mixamorig.mmd.motion import TargetMotion
 from motion2mixamorig.mmd.retarget import SOURCE_TO_MMD, retarget
 from motion2mixamorig.mmd.contacts import correct_feet, detect_contacts, foot_points, quality, constrain_ik_knees
 from motion2mixamorig.mmd.export import write_vmd, write_bvh, write_motion_encoder
+from motion2mixamorig.mmd.pipeline import run_mmd_pipeline
 
 
 def human_fixture(count=60, fps=30.):
@@ -70,6 +72,34 @@ class MMDTests(unittest.TestCase):
             np.testing.assert_allclose(position[0, profile.index[bone]], points[SMPL_JOINT_NAMES.index(joint)], atol=1e-6)
         np.testing.assert_allclose(position[0, profile.index["RightWrist"]], profile.position("RightWrist"), atol=1e-6)
 
+    def test_skull_center_offset_does_not_become_a_large_neck_bend(self):
+        source, profile = human_fixture(1)
+        points = source.joints_3d[0] @ SOURCE_TO_MMD.T
+        # A SMPL-like skull-center offset: mostly anterior, little vertical
+        # separation. This is not a 60-degree anatomical neck bend.
+        points[SMPL_JOINT_NAMES.index("head")] = points[SMPL_JOINT_NAMES.index("neck")]+[0., .04, -.07]
+        source.joints_3d[0] = points @ SOURCE_TO_MMD.T
+        target, _ = retarget(source, profile)
+        neck = target.rotations[0, profile.index["Neck"]]
+        self.assertLess(np.degrees(Rotation.from_quat(neck).magnitude()), 20.)
+        np.testing.assert_allclose(target.rotations[0, profile.index["Head"]], [0,0,0,1], atol=1e-7)
+
+    def test_neck_and_head_follow_a_coherent_upper_body_lean(self):
+        source, profile = human_fixture(1)
+        points = source.joints_3d[0] @ SOURCE_TO_MMD.T
+        pivot = points[SMPL_JOINT_NAMES.index("spine3")].copy()
+        lean = Rotation.from_euler("x", 25, degrees=True)
+        for name in ("neck", "head", "left_collar", "right_collar", "left_shoulder", "right_shoulder",
+                     "left_elbow", "right_elbow", "left_wrist", "right_wrist", "left_hand", "right_hand"):
+            i = SMPL_JOINT_NAMES.index(name)
+            points[i] = lean.apply(points[i]-pivot)+pivot
+        source.joints_3d[0] = points @ SOURCE_TO_MMD.T
+        target, _ = retarget(source, profile)
+        _, world = target.fk()
+        for name in ("Neck", "Head"):
+            np.testing.assert_allclose(target.rotations[0, profile.index[name]], [0,0,0,1], atol=1e-7)
+            np.testing.assert_allclose(world[0, profile.index[name]], lean.as_matrix(), atol=1e-7)
+
     def test_timing_root_and_heading_are_not_doubled(self):
         source, profile = human_fixture(60, 60.)
         times = source.timestamps
@@ -113,6 +143,9 @@ class MMDTests(unittest.TestCase):
         ok, animation = parse_vmd(path)
         self.assertTrue(ok)
         self.assertFalse(any(animation["ik_frames"][0]["states"].values()))
+        head_keys = animation["bones"]["Head"]
+        self.assertEqual(len(head_keys), 12)
+        np.testing.assert_allclose([key["rotation"] for key in head_keys], np.tile([0,0,0,1],(12,1)), atol=1e-7)
         root, bones = build_standard_skeleton()
         load_vmd_to_skeleton(animation, bones)
         expected, _ = target.fk()
@@ -205,6 +238,27 @@ class MMDTests(unittest.TestCase):
         self.assertIsNone(video)
         self.assertIsNone(rig)
         self.assertIsNone(image)
+
+    def test_pipeline_writes_raw_corrected_and_compatible_vmd_files(self):
+        source, profile = human_fixture(30)
+        source.joints_3d[:, :, 0] += np.linspace(0., .08, 30)[:, None]
+        path = self.root/"skeleton.npz"
+        np.savez(path, joints_3d=source.joints_3d, joint_names=source.joint_names,
+                 fps=source.fps, timestamps=source.timestamps)
+        expected, _ = retarget(source, profile)
+        for foot_lock in (False, True):
+            with self.subTest(foot_lock=foot_lock):
+                run = run_mmd_pipeline(skeleton_npz=path, output_dir=self.root/str(foot_lock),
+                                       foot_lock=foot_lock, no_preview=True)
+                report = json.loads((run/"run.json").read_text())
+                outputs = report["outputs"]
+                raw = run/outputs["motion_raw"]
+                corrected = run/outputs["motion_corrected"]
+                self.assertEqual(corrected.read_bytes(), (run/outputs["motion"]).read_bytes())
+                self.assertEqual(raw.read_bytes() != corrected.read_bytes(), foot_lock)
+                raw_target = np.load(run/outputs["target_motion_raw"])
+                np.testing.assert_allclose(raw_target["quat_xyzw"], expected.rotations, atol=1e-10)
+                np.testing.assert_allclose(raw_target["translations_m"], expected.translations, atol=1e-10)
 
 
 if __name__ == "__main__":

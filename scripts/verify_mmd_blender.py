@@ -11,7 +11,7 @@ import zipfile
 
 import bpy
 import numpy as np
-from mathutils import Quaternion
+from mathutils import Matrix, Quaternion
 
 
 def main():
@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--mmd-tools", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--variant", choices=("raw", "corrected"), default="corrected")
     args = parser.parse_args(sys.argv[sys.argv.index("--")+1:])
     sys.path.insert(0, str(args.mmd_tools.resolve()))
     vendor = (args.run_dir/"validation_dependencies").resolve()
@@ -41,15 +42,18 @@ def main():
     arm.select_set(True)
     bpy.context.view_layer.objects.active = arm
     bpy.context.scene.frame_set(0)
-    result = bpy.ops.mmd_tools.import_vmd(filepath=str((args.run_dir/"motion.vmd").resolve()),
+    vmd_path = args.run_dir/f"motion_{args.variant}.vmd"
+    if args.variant == "corrected" and not vmd_path.exists():
+        vmd_path = args.run_dir/"motion.vmd"  # Earlier runs used only this name.
+    result = bpy.ops.mmd_tools.import_vmd(filepath=str(vmd_path.resolve()),
                                         scale=.085, margin=0, bone_mapper="PMX", use_pose_mode=False)
     assert result == {"FINISHED"}, result
-    target = np.load(args.run_dir/"target_motion.npz")
+    target = np.load(args.run_dir/("target_motion_raw.npz" if args.variant == "raw" else "target_motion.npz"))
     names, parents, rest = target["bone_names"].tolist(), target["parents"], target["rest_positions_m"]
     q, t = target["quat_xyzw"], target["translations_m"]
     from mmd_tools.core.vmd import File
     independent = File()
-    independent.load(filepath=str(args.run_dir/"motion.vmd"))
+    independent.load(filepath=str(vmd_path))
     ik = independent.propertyAnimation[0].ik_states
     mode = json.loads((args.run_dir/"run.json").read_text())["ik_mode"]
     assert ik
@@ -61,6 +65,8 @@ def main():
                      "LeftWrist":"左手首", "RightWrist":"右手首", "LeftLeg":"左足", "RightLeg":"右足",
                      "LeftKnee":"左ひざ", "RightKnee":"右ひざ", "LeftAnkle":"左足首", "RightAnkle":"右足首"}
     errors = []
+    orientation_errors = []
+    basis = np.eye(3)[[0,2,1]]
     for frame in (0, len(q)//2, len(q)-1):
         rotation = np.array([np.array(Quaternion((v[3],v[0],v[1],v[2])).to_matrix()) for v in q[frame]])
         world, position = [], []
@@ -79,11 +85,25 @@ def main():
             expected = np.asarray(position[names.index(name)])[[0,2,1]]
             errors.append({"frame":frame,"bone":name,"error_m":float(np.linalg.norm(actual-expected)),
                            "actual":actual.tolist(),"expected":expected.tolist()})
+            if name in ("Neck", "Head"):
+                # Remove Blender's bone-display rest axes to compare the
+                # physical rotation of each control in MMD world coordinates.
+                rest_r = np.array(arm.data.bones[mapping[jp]].matrix_local.to_3x3())
+                actual_r = np.array(arm.pose.bones[mapping[jp]].matrix.to_3x3()) @ rest_r.T
+                expected_r = basis @ world[names.index(name)] @ basis.T
+                delta = Matrix(expected_r.T@actual_r).to_quaternion().normalized()
+                angle = float(np.degrees(2*np.arccos(np.clip(abs(delta.w),0.,1.))))
+                orientation_errors.append({"frame":frame,"bone":name,"error_deg":angle})
     report = {"blender":bpy.app.version_string, "imported_bones":len(arm.pose.bones),
-              "vmd_ik_states":ik,"max_error_m":max(e["error_m"] for e in errors),"samples":errors}
-    (args.run_dir/"blender_validation.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(json.dumps({k:v for k,v in report.items() if k!="samples"}, indent=2))
+              "vmd_ik_states":ik,"max_error_m":max(e["error_m"] for e in errors),"samples":errors,
+              "max_neck_head_orientation_error_deg":max(e["error_deg"] for e in orientation_errors),
+              "orientation_samples":orientation_errors}
+    report["variant"] = args.variant
+    report_name = "blender_validation_raw.json" if args.variant == "raw" else "blender_validation.json"
+    (args.run_dir/report_name).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(json.dumps({k:v for k,v in report.items() if k not in ("samples","orientation_samples")}, indent=2))
     assert report["max_error_m"] < .005, "Independent Blender/MMD playback disagrees with target FK"
+    assert report["max_neck_head_orientation_error_deg"] < .1, "Independent Blender neck/head orientation differs"
 
 
 if __name__ == "__main__":

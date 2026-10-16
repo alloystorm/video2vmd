@@ -62,7 +62,8 @@ class TargetMotion:
                             metadata=json.dumps({"profile": self.profile.name, "profile_hash": self.profile.identity,
                                                  "meters_per_vmd_unit": self.profile.unit, "quaternion": "xyzw",
                                                  "up": "+Y", "unobserved_hands": True,
-                                                 "head_orientation": "upright_root_heading",
+                                                 "neck_policy": "rest_relative_chest_to_head_axis",
+                                                 "head_orientation": "inherits_neck_no_independent_observation",
                                                  "observed_semantics": "fitted_from_body_landmarks_not_full_rotation_observations"}))
 
 

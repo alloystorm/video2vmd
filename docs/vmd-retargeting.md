@@ -50,13 +50,21 @@ Each run writes:
 | File | Contents |
 | --- | --- |
 | `motion.vmd` or `motion.bvh` | Dense 30 fps body animation |
+| `motion_raw.vmd` / `motion_corrected.vmd` | VMD before and after optional foot-contact cleanup; both always written for VMD runs |
 | `skeleton_motion.npz` | Reusable source human joints |
 | `target_motion.npz` | Version 1 target hierarchy, rest positions, local `xyzw` quaternions, animated local translations, timestamps, profile hash and fitted-channel mask |
+| `target_motion_raw.npz` | Matching target motion before foot-contact cleanup |
 | `contacts.npz` | Heel/toe contact mask, persistent anchors, transition weights, floor and thresholds; per-foot support codes 0=swing/unknown, 1=heel, 2=toe, 3=both |
 | `quality.json` | Before/after contact speed, anchor error, penetration, root travel, body jerk and reach residuals |
 | `run.json` | Inputs, format, profile identity, codec version/pin, calibration, timing and output listing |
 | `videos/target_skeleton.mp4` | Raw/corrected front and side skeleton views; silent, omitted by `--no-preview` |
 | `motion_encoder.npy` | Optional canonical 404-column array |
+
+`motion.vmd` remains an exact copy of `motion_corrected.vmd` for existing consumers.
+Without `--foot-lock`, raw and corrected VMD files are identical. Both use the
+same retargeting, neck mapping and selected FK/IK mode; "raw" means before foot
+cleanup, not the original human skeleton or an older retargeter. In IK mode,
+both variants include the necessary PMX knee-hinge compatibility conversion.
 
 Internally positions/translations are meters, time is seconds, and rotations are
 parent-relative `xyzw`. Source positions are mapped with `diag(-1,1,1)` into the
@@ -73,9 +81,14 @@ when the PMX has no Master. Other root translation controls remain neutral.
 Pelvis articulation and chest rotation have separate ownership. The unspecifiable
 synthetic `Torso1` helper remains neutral and is omitted from VMD. No fingers,
 facial expressions, eye movement, hair or clothing animation are estimated.
-Head orientation currently stays upright with root heading; wrists use only the
-available coarse hand direction. Joint-position-only input cannot resolve full
-limb twist or detailed head/hand orientation.
+The neck fits a virtual upper-chest-to-head axis against the target rest pose.
+SMPL's short neck-to-head offset points toward the skull center; aiming the MMD
+neck along it would add an anatomical bias as a large forward bend. The head
+stays neutral locally and follows the fitted neck, without a second opposite
+rotation to force world-upright heading. This remains a coarse position-based
+estimate, not independent head/gaze tracking. Wrists use only the available
+coarse hand direction. Joint-position-only input cannot resolve full limb twist
+or detailed head/hand orientation.
 
 VMD translations use the existing shared codec's 0.085 meters-per-unit convention.
 PMX geometry uses that same scale; a PMX authored with unusual units needs a new
@@ -135,9 +148,10 @@ python scripts/verify_mmd.py
 python scripts/verify_video_input.py
 ```
 
-Eleven deterministic retarget/export/contact tests cover rest/asymmetric anatomy,
+Fourteen deterministic retarget/export/contact tests cover rest/asymmetric anatomy,
 root heading/travel, resampling/fractional FPS, planted feet, airborne preservation, encoder
-agreement, BVH timing, knee hinges and asset-independent skeleton preflight.
+agreement, BVH timing, knee hinges, skull-center neck offsets, coherent upper-body
+lean, raw/corrected pipeline output and asset-independent skeleton preflight.
 The shared codec has 11 unittest checks; the motion_encoder pose/leg regressions
 (4 + 6) also pass against the new codec.
 
@@ -150,6 +164,7 @@ BVH importer.
 
 ```powershell
 blender --background --factory-startup --python-exit-code 1 --python scripts/verify_mmd_blender.py -- --mmd-tools path/to/blender_mmd_tools --model character.pmx --run-dir outputs/run
+blender --background --factory-startup --python-exit-code 1 --python scripts/verify_mmd_blender.py -- --mmd-tools path/to/blender_mmd_tools --model character.pmx --run-dir outputs/run --variant raw
 blender --background --factory-startup --python-exit-code 1 --python scripts/verify_bvh_blender.py -- --run-dir outputs/bvh_run
 ```
 

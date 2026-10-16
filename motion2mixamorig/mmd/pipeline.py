@@ -48,13 +48,16 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
         stage = "retarget"
         writer.emit(stage, .55, "Retargeting body motion to MMD")
         raw, calibration = retarget(human, profile)
+        if ik_mode == "ik":
+            raw = constrain_ik_knees(raw)
         contacts = detect_contacts(raw, floor=floor)
         before = quality(raw, contacts)
         corrected, correction = correct_feet(raw, contacts) if foot_lock else (raw, {"corrected_frames": 0})
-        if ik_mode == "ik":
+        if ik_mode == "ik" and foot_lock:
             corrected = constrain_ik_knees(corrected)
         correction["max_root_correction_m"] = float(np.linalg.norm(corrected.translations-raw.translations, axis=2).max())
         after = quality(corrected, contacts)
+        raw.save(run_dir/"target_motion_raw.npz")
         corrected.save(run_dir/"target_motion.npz")
         np.savez_compressed(run_dir/"contacts.npz", **contacts)
         metrics = {"before": before, "after": after, "correction": correction,
@@ -66,11 +69,17 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
         writer.emit(stage, .85, f"Writing {output_format.upper()} motion")
         output = run_dir / f"motion.{output_format}"
         if output_format == "vmd":
-            write_vmd(output, corrected, ik_mode=ik_mode)
+            write_vmd(run_dir/"motion_raw.vmd", raw, ik_mode=ik_mode)
+            write_vmd(run_dir/"motion_corrected.vmd", corrected, ik_mode=ik_mode)
+            # Keep the existing filename as an exact copy of corrected output.
+            shutil.copyfile(run_dir/"motion_corrected.vmd", output)
         else:
             write_bvh(output, corrected)
         outputs = {"motion": output.name, "skeleton_motion": motion_npz.name,
-                   "target_motion": "target_motion.npz", "contacts": "contacts.npz", "quality": "quality.json"}
+                   "target_motion_raw": "target_motion_raw.npz", "target_motion": "target_motion.npz",
+                   "contacts": "contacts.npz", "quality": "quality.json"}
+        if output_format == "vmd":
+            outputs.update(motion_raw="motion_raw.vmd", motion_corrected="motion_corrected.vmd")
         if output_format == "bvh":
             outputs["bvh_metadata"] = output.name+".json"
         if motion_encoder:

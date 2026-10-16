@@ -49,6 +49,8 @@ or `--format bvh`. `--model character.pmx` selects PMX proportions;
 `--ik-mode ik` adds supported PMX foot-IK controls to VMD (default: baked FK).
 These formats need no Mixamo rig. Cached-skeleton exports also need neither
 SMPL-X nor the source video. `--motion-encoder` adds a canonical 404-column NPY.
+VMD runs write `motion_raw.vmd` and `motion_corrected.vmd` (before/after optional
+foot cleanup); `motion.vmd` is an exact copy of the corrected file.
 
 Implementation: `motion2mixamorig/mmd/`. Usage and limits:
 [`docs/vmd-retargeting.md`](docs/vmd-retargeting.md). Verification:

@@ -66,8 +66,7 @@ def retarget(motion, profile):
     # Root height varies relative to a robust standing level, retaining crouches/jumps.
     translations[:, root_i, 1] = (pelvis[:, 1] - np.percentile(pelvis[:, 1], 75)) * scale
     aims = {"Torso": ("pelvis", "spine3", "Torso2"),
-            "Torso2": ("spine3", "neck", "Neck"),
-            "Neck": ("neck", "head", "Head")}
+            "Torso2": ("spine3", "neck", "Neck")}
     for side, lower in (("Left", "left"), ("Right", "right")):
         aims.update({side+"Shoulder": (lower+"_collar", lower+"_shoulder", side+"Arm"),
                      side+"Arm": (lower+"_shoulder", lower+"_elbow", side+"Elbow"),
@@ -90,6 +89,15 @@ def retarget(motion, profile):
                 local = heading
             elif name == "HipMaster":
                 local = parent_r.T @ pelvis_frame
+            elif name == "Neck":
+                # SMPL's short neck->head vector points toward the skull/jaw
+                # center, not along the neck's anatomical up axis. Aiming the
+                # target's neck at it adds a large permanent forward bend.
+                # Fit a longer virtual chest->head axis against the same span
+                # in the target rest pose, preserving the rig's own neck offset.
+                rest_axis = profile.position("Head")-profile.position("Torso2")
+                direction = j("head")-j("spine3")
+                local = align(rest_axis, parent_r.T @ direction)
             elif name in aims:
                 a, b, child = aims[name]
                 rest_direction = profile.position(child)-profile.position(name)
@@ -102,7 +110,10 @@ def retarget(motion, profile):
                                             profile.position("Neck")-profile.position("Torso2"))
                     local = parent_r.T @ chest @ rest_chest.T
             elif name == "Head":
-                local = parent_r.T @ heading
+                # Follow the neck; body landmarks do not observe a separate
+                # head orientation. World-upright heading would counter-rotate
+                # the fitted neck and chest.
+                local = np.eye(3)
             elif name in ("LeftWrist", "RightWrist"):
                 lower = "left" if name.startswith("Left") else "right"
                 hand = lower + "_hand"
@@ -124,4 +135,6 @@ def retarget(motion, profile):
     # One global floor offset; never independently ground every frame.
     translations[:, root_i, 1] -= np.percentile(np.stack(heights, axis=1).min(axis=1), 5)
     return out, {"source_to_target_basis": SOURCE_TO_MMD.tolist(), "translation_scale": scale,
-                 "root_policy": profile.root, "fps": 30., "unobserved_fingers": True}
+                 "root_policy": profile.root, "fps": 30., "unobserved_fingers": True,
+                 "neck_policy": "rest_relative_chest_to_head_axis",
+                 "head_orientation": "inherits_neck_no_independent_observation"}
