@@ -5,18 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Video2VMD · Motion inspector</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/projection.js" defer></script>
   <script src="/viewer.js" defer></script>
 </head>
 <body>
-  <header><div><span class="brand">V2VMD</span><span class="divider">/</span><strong>Motion inspector</strong></div><span id="summary">Loading motion…</span></header>
+  <header><div><span class="brand">V2VMD</span><span class="divider">/</span><strong>Motion inspector</strong></div><div class="header-controls"><select id="layout" aria-label="View mode" disabled><option value="split">Side by side</option><option value="overlap">Overlap video</option></select><select id="variant" aria-label="Motion variant" disabled></select><span id="summary">Loading motion…</span></div></header>
   <main>
     <section class="pane source">
       <div class="pane-title"><span>01 <b>Source video</b></span><span id="source-name"></span></div>
       <div class="viewport" id="source-view"><video id="video" playsinline preload="auto" muted></video><img id="image" alt="Source still" hidden><p id="source-note" hidden></p></div>
+      <div id="camera-controls" hidden>
+        <div class="camera-status"><label><input id="estimated" type="checkbox"> Estimated camera</label><label id="manual-follow"><input id="overlap-follow" type="checkbox" checked> Follow root</label><span id="camera-note">Manual camera alignment</span><button id="align-reset">Reset alignment</button></div>
+        <div class="camera-sliders">
+          <label>Vertical FOV <input id="fov" aria-label="Vertical field of view" type="range" min="10" max="120" step="0.1" value="45"><output id="fov-value">45°</output></label>
+          <label>Distance <input id="distance" aria-label="Camera distance" type="range" min="0.2" max="30" step="0.01" value="3.5"><output id="distance-value">3.5 m</output></label>
+          <label>Pan X <input id="pan-x" aria-label="Camera pan X" type="range" min="-100" max="100" step="0.1" value="0"><output id="pan-x-value">0%</output></label>
+          <label>Pan Y <input id="pan-y" aria-label="Camera pan Y" type="range" min="-100" max="100" step="0.1" value="0"><output id="pan-y-value">0%</output></label>
+          <label>Opacity <input id="opacity" aria-label="Skeleton opacity" type="range" min="0.1" max="1" step="0.01" value="0.9"><output id="opacity-value">90%</output></label>
+        </div>
+        <div class="camera-help">Drag to rotate · Shift + drag to pan · Scroll to dolly · Alignment controls affect inspection only</div>
+      </div>
     </section>
     <section class="pane motion">
-      <div class="pane-title"><span>02 <b>Retargeted skeleton</b></span><select id="variant" aria-label="Motion variant"></select></div>
-      <div class="viewport"><canvas id="scene" aria-label="Interactive 3D skeleton. Drag to orbit, scroll to zoom."></canvas><div class="legend"><span class="left">● Left</span><span class="right">● Right</span><span id="overlay-key" hidden>● Raw ghost</span></div><span id="frame-badge">FRAME 0000</span></div>
+      <div class="pane-title"><span>02 <b>Retargeted skeleton</b></span></div>
+      <div class="viewport" id="motion-view"><canvas id="scene" aria-label="Interactive 3D skeleton. Drag to orbit, scroll to zoom."></canvas><div class="legend" id="legend"><span class="left">● Left</span><span class="right">● Right</span><span id="overlay-key" hidden>● Raw ghost</span></div><span id="frame-badge">FRAME 0000</span></div>
       <div class="view-options"><span class="presets"><button id="front">Front</button><button id="side">Side</button><button id="reset">Reset view</button></span><label><input id="follow" type="checkbox" checked> Follow root</label><label><input id="helpers" type="checkbox"> All bones</label></div>
     </section>
   </main>

@@ -43,6 +43,9 @@ or inference weights. Extraction is expensive; reuse the NPZ when changing targe
 - `motion_raw.vmd` / `motion_corrected.vmd`: before/after optional foot cleanup.
 - `motion.vmd`: exact corrected copy; BVH runs instead write `motion.bvh` and metadata.
 - `skeleton_motion.npz`: reusable 24 SMPL joints, Y-up meters.
+  New extractions also save `camera_joints_3d` (OpenCV camera coordinates),
+  `camera_intrinsics` (full staged-image pixels), `camera_image_size` (W,H),
+  and per-frame `camera_world_to_camera` rotations for overlap inspection.
 - `target_motion_raw.npz` / `target_motion.npz`: target hierarchy, meter offsets,
   local xyzw quaternions, timestamps, profile hash and fitted-channel mask.
 - `contacts.npz`, `quality.json`, `run.json`, optional skeleton preview and
@@ -59,7 +62,9 @@ coordinate bases, root ownership and quaternion conventions explicit.
 - `video2vmd/extract.py`: GVHMR video/still extraction and input staging.
 - `video2vmd/mmd/`: profiles, body retargeting, contacts, export, preview, pipeline.
 - `video2vmd/inspection/`: localhost viewer, source proxy, HTTP byte ranges,
-  raw/corrected FK buffers and video-clock-driven canvas playback. No training imports.
+  raw/corrected FK buffers, estimated/manual camera overlap and video-clock-driven
+  canvas playback. No training imports. Letterboxing must match the media's
+  contained image rectangle; camera edits must never affect exported transforms.
 - `blender_extension/video2vmd_blender/`: thin Blender UI and subprocess services.
 - `docs/vmd-retargeting.md`: format contract, controls and known limits.
 
@@ -86,3 +91,7 @@ for viewer data/HTTP/CLI changes. Independent VMD/BVH import scripts
 run in fresh background Blender processes, never the user's open scene. Shared
 codec changes belong in the separate vmd2png repository; pin a published tested
 revision and leave the motion_encoder checkout unchanged.
+
+Run `node scripts/verify_inspection_projection.cjs` for overlap projection changes.
+`scripts/cache_inspection_camera.py` can add camera arrays to an older run using
+its matching trusted local GVHMR cache; it needs SMPL-X but does not rerun inference.

@@ -20,6 +20,8 @@ from video2vmd.cli import build_parser, preflight, run, inspect_run
 from video2vmd.inspection.server import prepare_inspection, prepare_media, make_server, resolve_source
 from video2vmd.mmd.motion import TargetMotion
 from video2vmd.mmd.profile import standard_profile
+from video2vmd.inspection.camera import camera_inspection
+from video2vmd.extract import SMPL_JOINT_NAMES, inspection_camera_payload
 
 
 class InspectionTests(unittest.TestCase):
@@ -89,8 +91,9 @@ class InspectionTests(unittest.TestCase):
         status, headers, data = request("/api/meta")
         self.assertEqual(status, 200); self.assertEqual(json.loads(data)["frames"], 10)
         self.assertEqual(server.server_address[0], "127.0.0.1")
-        for asset in ("/", "/viewer.js", "/style.css", "/api/poses.bin"):
+        for asset in ("/", "/viewer.js", "/projection.js", "/style.css", "/api/poses.bin"):
             self.assertEqual(request(asset)[0], 200)
+        self.assertEqual(request("/api/camera-poses.bin")[0],404)
         for value, start, end in (("bytes=17-37",17,37),("bytes=2040-",2040,2047),
                                   ("bytes=-8",2040,2047),("bytes=2040-9999",2040,2047)):
             status, headers, data = request("/media", headers={"Range":value})
@@ -143,6 +146,72 @@ class InspectionTests(unittest.TestCase):
         with patch("video2vmd.inspection.server.serve_inspection") as serve:
             self.assertEqual(inspect_run(self.root,"clip.mp4",port=8765,open_browser=False),0)
             serve.assert_called_once_with(self.root,Path("clip.mp4"),port=8765,open_browser=False)
+
+    def camera_fixture(self):
+        # The source body faces a camera with Y down; exercise X reflection,
+        # source->target scaling, and correction displacement independently.
+        names=SMPL_JOINT_NAMES
+        joints=np.zeros((10,24,3)); joints[:,:,2]=4
+        for lower in ("left","right"):
+            for part,y in (("hip",0),("knee",.5),("ankle",1)):
+                joints[:,names.index(lower+"_"+part),1]=y
+        rotation=np.repeat(np.diag([1.,-1.,-1.])[None],10,axis=0)
+        world=joints @ rotation[0]
+        k=np.array([[1000,0,500],[0,1000,800],[0,0,1.]])
+        path=self.root/"skeleton_motion.npz"
+        np.savez(path,joints_3d=world,joint_names=names,timestamps=np.arange(10)/30,
+                 camera_joints_3d=joints,camera_world_to_camera=rotation,
+                 camera_intrinsics=k,camera_image_size=[1000,1600])
+        return path,joints
+
+    def test_estimated_camera_preserves_correction_and_source_projection(self):
+        path,joints=self.camera_fixture()
+        motions={"corrected":self.corrected,"raw":self.raw}
+        camera=camera_inspection(path,motions)
+        np.testing.assert_allclose(np.frombuffer(camera.reconstruction,dtype="<f4").reshape(10,24,3),joints)
+        np.testing.assert_allclose(camera.metadata["intrinsics"][0],[1,.625,.5,.5])
+        values=np.frombuffer(camera.targets,dtype="<f4").reshape(2,10,-1,3)
+        pelvis=self.raw.profile.index["HipMaster"]
+        np.testing.assert_allclose(values[1,:,pelvis],joints[:,0],atol=1e-6)
+        # Corrected motion translates +X in MMD: it must move LEFT on camera.
+        self.assertLess(values[0,-1,pelvis,0],values[1,-1,pelvis,0])
+        self.assertGreater(values[0,-1,pelvis,2],0)
+        data=prepare_inspection(self.root,transcode=False)
+        self.assertIsNotNone(data.camera_poses);self.assertIsNotNone(data.metadata["camera"])
+
+    def test_invalid_camera_falls_back_to_manual_and_old_npz_stays_valid(self):
+        path,_=self.camera_fixture()
+        with np.load(path) as source:
+            payload={key:source[key] for key in source.files}
+        payload["camera_intrinsics"]=np.eye(3)*-1
+        np.savez(path,**payload)
+        with redirect_stdout(StringIO()):
+            result=prepare_inspection(self.root,transcode=False)
+        self.assertIsNone(result.metadata["camera"])
+        self.assertIsNone(result.camera_poses)
+        self.assertIsNotNone(result.world_reconstruction)
+
+    def test_source_reconstruction_remains_available_without_camera_arrays(self):
+        path,joints=self.camera_fixture()
+        with np.load(path) as source:
+            payload={key:source[key] for key in source.files if not key.startswith("camera_")}
+        np.savez(path,**payload)
+        result=prepare_inspection(self.root,transcode=False)
+        self.assertIsNone(result.metadata["camera"])
+        self.assertEqual(len(result.metadata["reconstruction"]["names"]),24)
+        expected=payload["joints_3d"]*[-1,1,1]
+        np.testing.assert_allclose(np.frombuffer(result.world_reconstruction,dtype="<f4").reshape(10,24,3),expected)
+
+    def test_extraction_persists_camera_without_viewer_ml_imports(self):
+        from types import SimpleNamespace
+        result=SimpleNamespace(smpl_params_world={"global_orient":np.zeros((2,3))},
+                               smpl_params_camera={"global_orient":np.repeat([[np.pi,0,0]],2,axis=0)},
+                               intrinsics=np.repeat(np.eye(3)[None],2,axis=0))
+        with patch("video2vmd.extract.joints_world_from_smplx",return_value=np.zeros((2,24,3))), \
+             patch("gvhmr.utils.video_io_utils.get_video_lwh",return_value=(2,1920,1080)):
+            data=inspection_camera_payload(result,Path("staged.mp4"),"cpu")
+        np.testing.assert_equal(data["camera_image_size"],[1920,1080])
+        np.testing.assert_allclose(data["camera_world_to_camera"][0],np.diag([1,-1,-1]),atol=1e-6)
 
 
 if __name__ == "__main__":

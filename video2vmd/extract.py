@@ -250,6 +250,30 @@ def _stabilize_pose_cache(pose_cache: Path) -> bool:
     return True
 
 
+def inspection_camera_payload(result, prepared_video: Path, device: str) -> dict:
+    """Persist camera observations while ML/model assets are already loaded.
+
+    The web inspector can then project without importing Torch or loading SMPL-X.
+    ``result.camera`` itself is just a backend name, not an extrinsic matrix.
+    """
+    from scipy.spatial.transform import Rotation
+    from gvhmr.utils.video_io_utils import get_video_lwh
+
+    if getattr(result, "smpl_params_camera", None) is None or getattr(result, "intrinsics", None) is None:
+        return {}
+    _, width, height = get_video_lwh(prepared_video)
+    camera_joints = joints_world_from_smplx(result.smpl_params_camera, device=device)
+    world_r = Rotation.from_rotvec(_to_numpy(result.smpl_params_world["global_orient"])).as_matrix()
+    camera_r = Rotation.from_rotvec(_to_numpy(result.smpl_params_camera["global_orient"])).as_matrix()
+    return {
+        "camera_joints_3d": camera_joints,
+        "camera_intrinsics": _to_numpy(result.intrinsics).astype(np.float32),
+        "camera_image_size": np.array([width, height], dtype=np.int32),
+        "camera_world_to_camera": (camera_r @ world_r.swapaxes(1,2)).astype(np.float32),
+        "camera_convention": np.array("opencv_xright_ydown_zforward"),
+    }
+
+
 def still_to_hold_video(
     image: Path,
     out_mp4: Path,
@@ -513,6 +537,7 @@ def extract_motion(
         camera=np.array(result.camera),
         video=np.array(str(video)),
     )
+    payload.update(inspection_camera_payload(result, prepared_video, device))
     if source_image is not None:
         payload["image"] = np.array(str(source_image))
         _strip_cache_videos(output_dir)

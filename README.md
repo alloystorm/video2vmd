@@ -85,6 +85,19 @@ timeline below. Video time drives the skeleton, including seeking and playback
 speed changes. Pause, step frame by frame, orbit/zoom, or compare **Raw**,
 **Corrected** and **Overlay**. The default view hides PMX helper bones.
 
+Choose **Overlap video** in the viewer's top bar to draw the skeleton directly
+over the source. Adjust **Vertical FOV**, **Distance**, **Pan X/Y** and **Opacity**;
+drag to rotate, Shift + drag to pan, and scroll to dolly. Switching views keeps
+the same video and timeline. These alignment controls do not change exports.
+
+New extractions save GVHMR camera-space joints, intrinsics and camera rotations.
+When present, **Estimated camera** starts the overlap aligned to the source;
+**Source reconstruction** shows the recovered 24-joint body, while raw/corrected
+target motion is aligned using the source pelvis and leg scale. Target body
+proportions can differ from the filmed person. Camera estimates remain editable.
+Older NPZs work with manual alignment, including a **Follow root** toggle.
+Their saved source reconstruction is available with the manual camera too.
+
 Reopen an existing run without extraction or retargeting:
 
 ```powershell
@@ -103,6 +116,16 @@ The viewer uses FK from the saved target motion NPZ (before VMD serialization),
 so no PMX asset is required to reopen it. It shows skeleton motion; mesh skinning,
 PMX physics, and a destination application's IK solver are not simulated.
 
+For development, an older run can gain camera observations from its matching
+local GVHMR prediction cache, without rerunning the detector or motion network:
+
+```powershell
+python scripts/cache_inspection_camera.py outputs/previous --prediction outputs/original/cache/clip/hmr4d_results.pt --device cuda
+```
+
+This conversion needs the extraction environment and SMPL-X. It verifies the
+cached root transforms and adds camera arrays to that run's skeleton NPZ.
+
 ## Blender
 
 The [Video2VMD extension](blender_extension/README.md) runs the external Python
@@ -117,6 +140,7 @@ python scripts/verify_mmd.py
 python scripts/verify_video_input.py
 python scripts/verify_blender_extension.py
 python scripts/verify_inspection.py
+node scripts/verify_inspection_projection.cjs
 python scripts/package_blender_extension.py
 ```
 

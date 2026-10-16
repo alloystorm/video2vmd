@@ -99,6 +99,9 @@ class Inspection:
     metadata: dict
     poses: bytes
     media: Path | None
+    camera_poses: bytes | None = None
+    reconstruction: bytes | None = None
+    world_reconstruction: bytes | None = None
 
 
 def prepare_inspection(run_dir: Path, source: Path | None = None, *, transcode=True) -> Inspection:
@@ -139,7 +142,24 @@ def prepare_inspection(run_dir: Path, source: Path | None = None, *, transcode=T
         "variants": list(motions), "source": source.name if source else None, "mediaKind": kind,
         "format": "float32-le / variant,frame,bone,xyz", "up": "+Y", "units": "meters",
     }
-    return Inspection(metadata, b"".join(p.tobytes() for p in positions), media)
+    from .camera import camera_inspection, world_reconstruction
+    skeleton = run_dir / "skeleton_motion.npz"
+    camera = None
+    reconstruction = None
+    if skeleton.is_file():
+        try:
+            reconstruction = world_reconstruction(skeleton,corrected.n_frames,corrected.fps)
+        except (ValueError,KeyError) as exc:
+            print(f"Inspection: source reconstruction unavailable ({exc}).")
+        try:
+            camera = camera_inspection(skeleton, motions)
+        except (ValueError, KeyError) as exc:
+            print(f"Inspection: estimated camera unavailable ({exc}); manual alignment is available.")
+    metadata["camera"] = camera.metadata if camera else None
+    metadata["reconstruction"] = reconstruction[0] if reconstruction else None
+    return Inspection(metadata, b"".join(p.tobytes() for p in positions), media,
+                      camera.targets if camera else None, camera.reconstruction if camera else None,
+                      reconstruction[1] if reconstruction else None)
 
 
 def byte_range(value: str, size: int) -> tuple[int, int]:
@@ -211,6 +231,7 @@ def make_server(inspection: Inspection, port=0) -> ThreadingHTTPServer:
                 return
             assets = {"/": ("index.html", "text/html; charset=utf-8"),
                       "/viewer.js": ("viewer.js", "text/javascript; charset=utf-8"),
+                      "/projection.js": ("projection.js", "text/javascript; charset=utf-8"),
                       "/style.css": ("style.css", "text/css; charset=utf-8")}
             if route in assets:
                 name, mime = assets[route]
@@ -219,6 +240,12 @@ def make_server(inspection: Inspection, port=0) -> ThreadingHTTPServer:
                 data, mime = json.dumps(inspection.metadata, ensure_ascii=False).encode(), "application/json; charset=utf-8"
             elif route == "/api/poses.bin":
                 data, mime = inspection.poses, "application/octet-stream"
+            elif route == "/api/camera-poses.bin" and inspection.camera_poses is not None:
+                data, mime = inspection.camera_poses, "application/octet-stream"
+            elif route == "/api/reconstruction.bin" and inspection.reconstruction is not None:
+                data, mime = inspection.reconstruction, "application/octet-stream"
+            elif route == "/api/world-reconstruction.bin" and inspection.world_reconstruction is not None:
+                data, mime = inspection.world_reconstruction, "application/octet-stream"
             else:
                 self.send_error(404)
                 return
