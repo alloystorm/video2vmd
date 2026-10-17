@@ -23,7 +23,7 @@ from .export import write_bvh, write_motion_encoder, write_vmd
 def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=None,
                      device="cpu", output_format="vmd", model=None, foot_lock=False,
                      floor=None, motion_encoder=False, no_preview=False, progress=None, ik_mode="fk", depth_cleanup=False,
-                     hand_motion=None):
+                     hand_motion=None, hands=False, hand_config=None):
     started, clock = datetime.now(), time.monotonic()
     source = Path(image or video or skeleton_npz).resolve()
     run_dir = Path(output_dir).resolve() if output_dir else paths.new_run_dir(source, started)
@@ -31,6 +31,8 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
     writer = progress or ProgressWriter()
     stage = "profile"
     try:
+        if hands and hand_motion:
+            raise ValueError("Choose --hands extraction or --hand-motion cache reuse")
         profile = pmx_profile(model) if model else standard_profile()
         stage = "extract"
         writer.emit(stage, .15, "Loading or extracting human motion")
@@ -46,6 +48,18 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
             else:
                 extract_motion(Path(video), motion_npz, work_dir=run_dir/"cache", device=device)
         human = load_human_motion(motion_npz)
+        hand_extraction = {"enabled": False}
+        extraction_outputs = {}
+        if hands:
+            from ..hand_extract import extract_hand_motion
+            stage = "hand_extract"
+            writer.emit(stage, .38, "Extracting body-guided WiLoR hand observations")
+            hand_motion, hand_extraction = extract_hand_motion(
+                motion_npz, run_dir/"cache/hands", source=image or video, config=hand_config, device=device,
+                progress=lambda done, total: writer.emit("hand_extract", .38+.15*done/total,
+                                                        f"Hand observations {done}/{total}"))
+            (run_dir/"hand_extraction.json").write_text(json.dumps(hand_extraction, indent=2)+"\n", encoding="utf-8")
+            extraction_outputs = {"hand_extraction": "hand_extraction.json", "hand_observations": "cache/hands/observations.json"}
         stage = "retarget"
         writer.emit(stage, .55, "Retargeting body motion to MMD")
         raw, calibration = retarget(human, profile)
@@ -121,6 +135,7 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
                    "contacts": "contacts.npz", "quality": "quality.json"}
         outputs.update(depth_outputs)
         outputs.update(hand_outputs)
+        outputs.update(extraction_outputs)
         if output_format == "vmd":
             outputs.update(motion_raw="motion_raw.vmd", motion_corrected="motion_corrected.vmd")
         if output_format == "bvh":
@@ -148,7 +163,8 @@ def run_mmd_pipeline(video=None, *, image=None, skeleton_npz=None, output_dir=No
                                 "source": str(source), "skeleton_reused_from": str(skeleton_npz) if skeleton_npz else None,
                                 "device": device, "fps": corrected.fps, "n_frames": corrected.n_frames,
                                 "depth_cleanup":depth_report,
-                                "hands":hand_report, "hand_motion_reused_from":str(Path(hand_motion).resolve()) if hand_motion else None,
+                                "hands":hand_report, "hand_extraction":hand_extraction,
+                                "hand_motion_reused_from":str(Path(hand_motion).resolve()) if hand_motion and not hands else None,
                                 "units": "meters", "calibration": calibration, "outputs": outputs})
         writer.emit("done", 1., "Completed")
         print(f"saved {output} ({corrected.n_frames} frames at {corrected.fps:g} fps)")

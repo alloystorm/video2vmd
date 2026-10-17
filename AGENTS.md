@@ -26,6 +26,7 @@ v2vmd doctor
 v2vmd run --video assets/video/dance.mp4 --device cuda --foot-lock
 v2vmd run assets/video/dance.mp4 --device cuda --foot-lock --inspect
 v2vmd run assets/video/dance.mp4 --device cuda --depth-cleanup --foot-lock --inspect
+v2vmd run assets/video/dance.mp4 --device cuda --hands --foot-lock --inspect
 v2vmd inspect outputs/<run>  # reopen saved motion + original video in a local browser
 v2vmd run --image assets/image/pose.jpg --model assets/mmd/character.pmx
 v2vmd doctor --skeleton outputs/<run>/skeleton_motion.npz
@@ -56,6 +57,10 @@ or inference weights. Extraction is expensive; reuse the NPZ when changing targe
   and `depth_cleanup.json` / `.npz`. Preserve original source and raw exports.
 - With `--hand-motion`: resampled `hand_motion.npz`, `hand_retargeting.json` and
   `target_motion_body.npz` for a neutral-finger comparison in inspection.
+- `--hands` extracts WiLoR observations directly using body-guided crops, then
+  writes the same hand outputs plus `hand_extraction.json` and `cache/hands/`.
+  It needs original media, numeric body camera arrays and the optional local
+  WiLoR/MANO runtime. A matching completed hand cache skips hand inference.
 
 Keep fingers neutral unless a calibrated observation cache is supplied; face
 remains neutral. Hand retargeting preserves wrist positions, arm/body rotations
@@ -76,6 +81,8 @@ coordinate bases, root ownership and quaternion conventions explicit.
 - `video2vmd/mmd/`: profiles, body retargeting, contacts, export, preview, pipeline.
 - `video2vmd/hand_motion.py`, `mmd/hands.py`: hand cache, gap SLERP and finger
   retargeting from canonical MANO axes into target rest axes.
+- `video2vmd/hand_extract.py`, `wilor_backend.py`: optional body-guided hand
+  extraction, source presentation-time sampling and fingerprinted cache reuse.
 - `video2vmd/inspection/`: localhost viewer, source proxy, HTTP byte ranges,
   raw/corrected FK buffers, estimated/manual camera overlap and video-clock-driven
   canvas playback. No training imports. Letterboxing must match the media's
@@ -112,6 +119,7 @@ Run `python scripts/verify_depth_cleanup.py` for depth-cleanup or related pipeli
 Run `python scripts/verify_feet.py` for contact, heel/toe pitch or leg-solver changes.
 Run `python scripts/verify_noise_analysis.py` for batch-analysis metric changes.
 Run `python scripts/verify_hand_motion.py` for hand observation/cache or gap-interpolation changes.
+Run `python scripts/verify_hand_extraction.py` for hand inference orchestration, source timing, association or cache reuse.
 Run `python scripts/verify_hand_retargeting.py` for finger rest-axis, export or hand-pipeline changes.
 See `docs/noise-analysis.md` for reproducible multi-video processing and ablations.
 `scripts/cache_inspection_camera.py` can add camera arrays to an older run using

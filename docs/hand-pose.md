@@ -3,8 +3,58 @@
 Status (2026-10-17): cached WiLoR hands, gap completion, finger retargeting and
 VMD/BVH/motion-encoder export are connected through `v2vmd run --hand-motion`.
 Inspection includes both hand close-ups, fingertip geometry and evidence states.
+`--hands` now runs body-guided WiLoR extraction and the same cache/retargeting
+pipeline in one command, without the MediaPipe probe stage.
 
 ## Run with finger animation
+
+With the optional local WiLoR runtime configured:
+
+```powershell
+v2vmd run assets/video/dance.mp4 --hands --device cuda --foot-lock --inspect
+v2vmd run --skeleton outputs/body_run/skeleton_motion.npz --hands --device cuda --model assets/mmd/ab7_160404/ab7.pmx --inspect
+```
+
+Cached-body extraction finds original media in the NPZ; pass `--video` or `--image`
+when that source moved. A conflicting source is rejected while the recorded
+original still exists. It requires numeric camera joints, intrinsics, image size
+and world-to-camera rotations. Old body caches can be upgraded using
+`scripts/cache_inspection_camera.py`; body inference need not be repeated.
+
+`--hands` and `--hand-motion` are mutually exclusive. Extraction writes
+`cache/hands/observations.json` with candidates, body-side associations, rejection
+reasons and decoded source timestamps, plus `hand_extraction.json` and the normal
+resampled `hand_motion.npz`. Running `--hands` again in the same output directory
+reuses a completed cache only when source content, body camera arrays, model files
+and extraction implementation match. Changed inputs require a fresh directory.
+For another target, use `--hand-motion` to skip all observation setup and inference.
+
+Video crops sample the nearest decoded presentation time on the body timeline,
+respecting phone orientation. A still is observed once; its pose is held over the
+body hold clip. Association uses the established projected body wrist gate and
+rejects ambiguous duplicate detections across overlapping crops. All bounded
+missing-pose gaps interpolate; observed keys are not smoothed or pose-filtered.
+
+### Optional local runtime
+
+The working local setup uses these defaults (all remain gitignored):
+
+| Input | Default | Override |
+| --- | --- | --- |
+| Official WiLoR checkout | `outputs/dependencies/WiLoR` | `--wilor-repo` |
+| WiLoR Python dependencies | `outputs/dependencies/wilor_extra` | `--wilor-extras` |
+| `detector.pt` and `wilor_final.ckpt` | `weights/wilor` | `--hand-weights` |
+| Licensed `MANO_RIGHT.pkl` | `assets/body_models/mano/MANO_RIGHT.pkl`, then the existing `outputs/dependencies/wilor_mano/MANO_RIGHT.pkl` | `--mano-model` |
+
+The official source must include `pretrained_models/model_config.yaml` and
+`mano_data/mano_mean_params.npz`. Use the official WiLoR setup instructions for its
+dependencies and checkpoints; no hand model, weight or dependency is downloaded
+automatically by `--hands`. Preflight checks the local assets before body
+extraction. Hand runtimes stay in external Python; cached export and inspection
+load only numeric arrays. Backend weights, MANO and source content are fingerprinted
+in the extraction report. The existing comparison script shares the same backend.
+
+### Reuse or calibrate a hand cache
 
 New WiLoR probe caches include the numeric MANO rest calibration. Add the cache
 to an ordinary body run or cached-skeleton export:
@@ -22,10 +72,10 @@ python scripts/complete_hand_motion.py outputs/diagnostics/hand_pose_sequence_wi
 ```
 
 Subsequent cached exports and inspection need neither MANO nor inference weights.
-Hand observation extraction currently uses `scripts/probe_hand_pose.py` plus
-`scripts/probe_wilor_hands.py`; `v2vmd run --hand-motion` consumes their cache and
-does not automatically run WiLoR. Use a full-rate observation cache for final
-animation rather than the twelve-frame sparse experiments.
+The earlier MediaPipe/WiLoR comparison scripts remain available for experiments;
+`--hands` is the direct extraction path. `--hand-motion` consumes an existing
+cache and does not run WiLoR. Use a full-rate cache for final animation rather
+than the twelve-frame sparse experiments.
 
 Finger retargeting preserves arm/body rotations, wrist positions and all
 translations. It maps
@@ -70,6 +120,8 @@ wrist positions, mirrored palm frames, moving cameras, cache reuse,
 VMD rotation readback, BVH channel reconstruction, encoder hand channels and HTTP
 fingertip buffers. This integration is validated through inspection; no Blender
 process is needed for this workflow.
+`scripts/verify_hand_extraction.py` covers source-clock sampling, still holds,
+duplicate rejection, preflight, model-free cache reuse and main-pipeline artifacts.
 
 ## What is already available
 
@@ -293,9 +345,9 @@ retains evidence masks. VMD/BVH and the canonical motion encoder receive finger
 rotations, including neutral/reset keys. Inspection provides hand close-ups and
 terminal fingertip FK, with independent VMD/BVH readback checks.
 
-Observation extraction remains an explicit script stage. Future work can add a
-single-command extraction option, stronger temporal identity, adaptive crop
-scales, duplicate rejection and geometric quality gates. Preserve raw detector
+Observation extraction is available through `--hands`. Future work can add
+stronger temporal identity, adaptive crop scales and geometric quality gates.
+Preserve raw detector
 handedness and confidence separately from derived pose-quality measures. Evaluate
 any smoothing, joint limits or confidence-based palm rejection separately;
 the current stage preserves observed finger poses and fits available palm frames.

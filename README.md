@@ -51,11 +51,14 @@ v2vmd doctor
 v2vmd run --video assets/video/dance.mp4 --device cuda --foot-lock
 v2vmd run assets/video/dance.mp4 --device cuda --foot-lock --inspect
 v2vmd run assets/video/dance.mp4 --device cuda --depth-cleanup --foot-lock --inspect
+# Optional WiLoR hands, with the local hand runtime/model configured.
+v2vmd run assets/video/dance.mp4 --device cuda --hands --foot-lock --inspect
 v2vmd run --image assets/image/pose.jpg --model assets/mmd/character.pmx
 
 # Reuse extraction and change the target quickly.
 v2vmd doctor --skeleton outputs/previous/skeleton_motion.npz
 v2vmd run --skeleton outputs/previous/skeleton_motion.npz --model assets/mmd/character.pmx --foot-lock
+v2vmd run --skeleton outputs/previous/skeleton_motion.npz --hand-motion outputs/hands_run/hand_motion.npz --model assets/mmd/character.pmx --inspect
 
 # BVH or canonical motion_encoder data.
 v2vmd run --skeleton outputs/previous/skeleton_motion.npz --format bvh --no-preview
@@ -75,8 +78,12 @@ quality metrics and a front/side skeleton preview. Default output directory:
 `outputs/<timestamp>_<source>/`.
 
 See [format conventions, IK mode and quality limits](docs/vmd-retargeting.md).
-Foot cleanup is conservative. Fingers, face, gaze and secondary animation are
-not captured; head orientation follows a coarse fitted neck axis.
+Foot cleanup is conservative. `--hands` optionally extracts finger and palm poses
+with the separately configured WiLoR runtime and licensed MANO model. Missing
+poses interpolate; clip edges hold. `--hand-motion` reuses the saved numeric cache
+without hand inference dependencies. See [hand setup and conventions](docs/hand-pose.md).
+Face, gaze and secondary animation are not captured; head orientation follows a
+coarse fitted neck axis.
 
 `--depth-cleanup` enables conservative root-depth regularization for static-camera
 extractions. It works on combined metric depth, protects coherent movement, uses

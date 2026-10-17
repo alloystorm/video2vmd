@@ -152,6 +152,12 @@ def preflight(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path 
             except (ValueError, KeyError, OSError) as exc:
                 problems += 1
                 print(f"{BAD} hand motion: {exc}")
+    if getattr(args, "hands", False):
+        from .hand_extract import HandConfig, check_hand_runtime
+        args.hand_config = HandConfig.from_options(repo=args.wilor_repo, extras=args.wilor_extras,
+                                                   weights=args.hand_weights, mano=args.mano_model)
+        for problem in check_hand_runtime(args.hand_config):
+            check("hand extraction setup", False, problem+"; see docs/hand-pose.md")
     if getattr(args, "floor", None) is not None:
         import math
         check("floor height", math.isfinite(args.floor), "--floor must be a finite number in meters")
@@ -242,6 +248,14 @@ def preflight(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path 
         if getattr(args,"depth_cleanup",False):
             from .depth_cleanup import check_depth_input
             check_content("depth cleanup camera observations",skeleton,check_depth_input)
+        if getattr(args, "hands", False) and skeleton.is_file():
+            from .hand_extract import load_hand_body, resolve_hand_source
+            try:
+                load_hand_body(skeleton)
+                hand_source = resolve_hand_source(skeleton, image or video)
+                check(f"hand source        {hand_source}", True, "")
+            except (ValueError, KeyError, OSError) as exc:
+                check("hand extraction inputs", False, str(exc))
     else:
         check(
             f"SMPL-X body model  {paths.SMPLX_NEUTRAL.relative_to(paths.PROJECT_ROOT)}",
@@ -288,7 +302,8 @@ def run(args: argparse.Namespace) -> int:
                                   foot_lock=args.foot_lock, floor=args.floor, motion_encoder=args.motion_encoder,
                                   no_preview=args.no_preview, progress=progress, ik_mode=args.ik_mode,
                                   depth_cleanup=getattr(args,"depth_cleanup",False),
-                                  hand_motion=getattr(args,"hand_motion",None))
+                                  hand_motion=getattr(args,"hand_motion",None),
+                                  hands=getattr(args,"hands",False), hand_config=getattr(args,"hand_config",None))
     except Exception:
         import traceback
 
@@ -342,7 +357,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--format", choices=["vmd", "bvh"], default="vmd", help="output format (default: vmd)")
     p_run.add_argument("--mmd-profile", choices=["standard"], default="standard", help="MMD reference skeleton")
     p_run.add_argument("--model", help="PMX target skeleton/proportions for VMD/BVH (default: standard profile)")
-    p_run.add_argument("--hand-motion", help="retarget fingers from a calibrated hand_motion.npz; missing poses interpolate and clip edges hold")
+    hand_source = p_run.add_mutually_exclusive_group()
+    hand_source.add_argument("--hands", action="store_true", help="extract WiLoR hands from source media, interpolate gaps, then retarget fingers and palms")
+    hand_source.add_argument("--hand-motion", help="retarget fingers from a calibrated hand_motion.npz; missing poses interpolate and clip edges hold")
+    hand_setup = p_run.add_argument_group("optional WiLoR hand runtime")
+    hand_setup.add_argument("--mano-model", help="licensed MANO_RIGHT.pkl (default: assets/body_models/mano or local WiLoR setup)")
+    hand_setup.add_argument("--wilor-repo", help="official WiLoR source directory (default: outputs/dependencies/WiLoR)")
+    hand_setup.add_argument("--wilor-extras", help="WiLoR Python dependency directory (default: outputs/dependencies/wilor_extra)")
+    hand_setup.add_argument("--hand-weights", help="directory with detector.pt and wilor_final.ckpt (default: weights/wilor)")
     p_run.add_argument("--foot-lock", action="store_true", help="bake temporal foot-contact correction into VMD/BVH")
     p_run.add_argument("--depth-cleanup",action="store_true",help="adaptively reduce root-depth jitter using saved static-camera observations; preserves raw exports")
     p_run.add_argument("--ik-mode", choices=["fk", "ik"], default="fk", help="VMD baked FK or PMX foot-IK controls (default: fk)")
