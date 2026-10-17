@@ -1,5 +1,7 @@
 """Temporal contact anchors and baked target-space foot correction, in meters."""
 import numpy as np
+from scipy import sparse
+from scipy.sparse.linalg import splu
 from scipy.spatial.transform import Rotation
 
 from .motion import TargetMotion
@@ -112,11 +114,107 @@ def _foot_target(points, ankle, anchors, weights, floor):
     return ankle+delta, tilt, angle, slide > .12
 
 
+def _bounded_contact_offsets(offsets, points, weights, fps, speed=.5, acceleration=12.):
+    """Fit horizontal corrections with zero correction outside observed support.
+
+    Bounds apply to the correction, not the actor's velocity. Two zero samples
+    at internal boundaries constrain both entry/exit velocity and acceleration;
+    clip endpoints have no invented touchdown or release. Euclidean constraints
+    keep the result invariant to world heading. No contact gaps are bridged.
+    """
+    result = np.zeros_like(offsets)
+    failures = 0
+    supported = weights.sum(axis=1) > 0
+    for start, end in runs(supported):
+        count = end-start
+        left, right = 2*int(start > 0), 2*int(end < len(offsets))
+        embedding = sparse.vstack((sparse.csc_matrix((left, count)), sparse.eye(count),
+                                   sparse.csc_matrix((right, count))), format="csc")
+        d1 = embedding[1:]-embedding[:-1]
+        d2 = d1[1:]-d1[:-1]
+        # Work in centimeters so the optimizer's absolute tolerance is useful.
+        desired = offsets[start:end]*100.
+        pair_mask = (weights[start+1:end] > 0) & (weights[start:end-1] > 0)
+        pair_weight = pair_mask * np.where((weights[start+1:end] >= 1.-1e-8)
+                                          & (weights[start:end-1] >= 1.-1e-8), 100., 1.)
+        point_steps = np.diff(points[start:end], axis=0)*100.
+        identity = sparse.eye(count, format="csc")
+        contact_difference = identity[1:]-identity[:-1]
+        matrices = (embedding, d1, d2)
+        acceleration_limits = np.full(d2.shape[0], acceleration*100./fps**2)
+        # Across a one-frame gap the two adjacent intervals both contribute to
+        # the same acceleration sample. Reserve half its budget for each side.
+        if start >= 2 and supported[start-2]:
+            acceleration_limits[0] *= .5
+        if end+1 < len(offsets) and supported[end+1]:
+            acceleration_limits[-1] *= .5
+        limits = (np.full(embedding.shape[0], 12.), np.full(d1.shape[0], speed*100./fps), acceleration_limits)
+        # Quadratic objective: stay near the original anchors, discourage added
+        # acceleration and minimize supported-point slip (holds weighted 100x).
+        hessian = (.005*identity + .01*d2.T @ d2
+                   + contact_difference.T @ sparse.diags(pair_weight.sum(axis=1)) @ contact_difference)
+        rhs = .005*desired - contact_difference.T @ (point_steps*pair_weight[:, :, None]).sum(axis=1)
+        constraints = sparse.vstack([sparse.diags(1./limit) @ matrix
+                                     for matrix, limit in zip(matrices, limits)], format="csc")
+        unconstrained = splu(hessian.tocsc()).solve(rhs)
+        if np.linalg.norm(constraints @ unconstrained, axis=1).max() <= 1.:
+            result[start:end] = unconstrained/100.
+            continue
+        gram = constraints.T @ constraints
+        # ADMM splits the Euclidean speed/acceleration balls from a banded
+        # least-squares solve. Memory stays linear for arbitrarily long holds.
+        rho = 1.
+        factor = splu((hessian + rho*gram).tocsc())
+        z = np.zeros((constraints.shape[0], 2))
+        dual = z.copy()
+        for iteration in range(2000):
+            values = factor.solve(rhs + rho*constraints.T @ (z-dual))
+            projected = constraints @ values
+            previous = z
+            candidate = projected+dual
+            z = candidate / np.maximum(1., np.linalg.norm(candidate, axis=1))[:, None]
+            dual += projected-z
+            primal_error = np.max(np.abs(projected-z))
+            dual_error = np.max(np.abs(rho*constraints.T @ (z-previous)))
+            if max(primal_error, dual_error) < 1e-6:
+                break
+            if iteration % 25 == 24:
+                multiplier = 2. if primal_error > 10.*dual_error else .5 if dual_error > 10.*primal_error else 1.
+                if multiplier != 1.:
+                    rho *= multiplier
+                    dual /= multiplier
+                    factor = splu((hessian + rho*gram).tocsc())
+        else:
+            failures += 1
+        # Remove residual numerical infeasibility, including on iteration limit.
+        # Scaling toward zero preserves every convex bound and the support mask.
+        values /= max(1., float(np.linalg.norm(constraints @ values, axis=1).max()))
+        result[start:end] = values/100.
+    return result, failures
+
+
 def correct_feet(motion, contacts):
     out = TargetMotion(motion.profile, motion.rotations.copy(), motion.translations.copy(), motion.fps)
     original_points = foot_points(motion)
     raw_pos, raw_rot = motion.fk()
     profile = motion.profile
+    planned = {}
+    transition_failures = 0
+    for side_num, side in enumerate(("Left", "Right")):
+        sl = slice(side_num*2, side_num*2+2)
+        ankle = profile.index[side+"Ankle"]
+        frames = [_foot_target(original_points[t, sl], raw_pos[t, ankle],
+                               contacts["anchors_m"][t, sl], contacts["weights"][t, sl],
+                               contacts["floor_m"]) for t in range(motion.n_frames)]
+        offsets = np.array([value[0]-raw_pos[t, ankle] for t, value in enumerate(frames)])[:, [0, 2]]
+        tilted = np.array([raw_pos[t, ankle] + (original_points[t, sl]-raw_pos[t, ankle]) @ value[1].T
+                           for t, value in enumerate(frames)])[:, :, [0, 2]]
+        bounded, failures = _bounded_contact_offsets(
+            offsets, tilted, contacts["weights"][:, sl], motion.fps)
+        transition_failures += failures
+        for t, (target, tilt, pitch, limited) in enumerate(frames):
+            target[[0, 2]] = raw_pos[t, ankle, [0, 2]] + bounded[t]
+        planned[side] = frames
     root = profile.index[profile.root]
     residuals, pitches = [], []
     collision_frames = corrected_frames = slide_limited = 0
@@ -133,9 +231,7 @@ def correct_feet(motion, contacts):
                 continue
             collision |= penetrating and total <= 0
             ankle = profile.index[side+"Ankle"]
-            target, tilt, pitch, limited = _foot_target(
-                original_points[frame, sl], raw_pos[frame, ankle],
-                contacts["anchors_m"][frame, sl], weights, contacts["floor_m"])
+            target, tilt, pitch, limited = planned[side][frame]
             targets.append((side, target, tilt))
             pitches.append(abs(pitch))
             slide_limited += int(limited)
@@ -180,7 +276,10 @@ def correct_feet(motion, contacts):
     for frame in range(1, out.n_frames):
         flip = np.sum(out.rotations[frame-1]*out.rotations[frame], axis=1) < 0
         out.rotations[frame, flip] *= -1
-    return out, {"method": "heel_toe_clearance_v2", "max_reach_residual_m": max(residuals, default=0.),
+    return out, {"method": "heel_toe_clearance_v3", "max_reach_residual_m": max(residuals, default=0.),
+                 "horizontal_correction_speed_limit_m_s": .5,
+                 "horizontal_correction_acceleration_limit_m_s2": 12.,
+                 "transition_fit_failures": transition_failures,
                  "corrected_frames": corrected_frames, "swing_clearance_frames": collision_frames,
                  "slide_limited_foot_frames": slide_limited, "max_foot_pitch_correction_rad": max(pitches, default=0.),
                  "max_pelvis_lowering_m": maximum_lowering}

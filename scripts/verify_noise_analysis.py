@@ -7,9 +7,34 @@ import numpy as np
 
 from analyze_motion_noise import highpass, interior, trajectory_metrics, vector_rms, correlation
 from compare_reference_vmd import window_metrics,SampledWorldMotion
+from compare_foot_transitions import metrics
 
 
 class NoiseAnalysisTests(unittest.TestCase):
+    def test_transition_comparison_uses_fixed_labels_and_physical_derivatives(self):
+        from verify_mmd import human_fixture
+        from video2vmd.mmd.retarget import retarget
+        from video2vmd.mmd.motion import TargetMotion
+        from video2vmd.mmd.contacts import detect_contacts
+        source, profile = human_fixture(30)
+        base, _ = retarget(source, profile)
+        evidence = detect_contacts(base, floor=0.)
+        evidence["contact"][:] = True
+        evidence["weights"][:] = 1.
+        evidence["weights"][:3] = .5
+        evidence["weights"][-3:] = .5
+        moved = TargetMotion(profile, base.rotations.copy(), base.translations.copy(), base.fps)
+        t = np.arange(moved.n_frames)/moved.fps
+        moved.translations[:, 0, 0] += .5*.2*t*t
+        report = metrics(moved, base, evidence)
+        self.assertEqual(report["slip"]["transition"]["pairs"], 6*4)
+        self.assertEqual(report["slip"]["hold"]["pairs"], 23*4)
+        self.assertAlmostEqual(report["horizontal_correction_acceleration_m_s2"]["max"], .2, places=10)
+        self.assertAlmostEqual(report["horizontal_correction_speed_m_s"]["max"], .2*(t[-1]+t[-2])/2, places=10)
+        evidence["contact"][:] = False
+        empty = metrics(base, base, evidence)
+        self.assertIsNone(empty["slip"]["all"]["mean_m_s"])
+
     def test_highpass_rejects_slow_motion_and_retains_known_8hz_noise(self):
         fps=30.;t=np.arange(600)/fps
         slow=np.column_stack([.1*np.sin(2*np.pi*.5*t),np.zeros(len(t)),np.zeros(len(t))])

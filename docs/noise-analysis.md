@@ -65,6 +65,33 @@ optical-axis camera movement or recover a metric trajectory. Target image
 displacement measures changes under the estimated camera, not error against
 observed landmarks; the depth-only reprojection budget does not constrain feet.
 
+## Foot-transition comparison
+
+Compare an existing study's saved combined motion against the current foot solver
+without rerunning inference or changing its contact evidence:
+
+```powershell
+python scripts/compare_foot_transitions.py outputs/diagnostics/noise_study_20261017 --output outputs/diagnostics/foot_transitions_new --model assets/mmd/ab7_160404/ab7.pmx --plots
+```
+
+Use a fresh output directory outside the original study. `--clip v01` selects a
+clip (repeatable); omit `--model` for NPZ-only results. `--plots` writes trajectory
+plots around each clip's largest previous horizontal correction acceleration.
+The report includes unchanged-mask hold/transition slip, correction derivatives,
+floor penetration, anchor distance, body jerk and added image displacement under
+the estimated camera. The same saved raw pelvis anchors both camera projections.
+Input hashes and the solver hash are recorded; originals remain intact. This
+comparison expects cached depth-stage and combined target motion from a study.
+
+On the six-video AB7 study, the v3 horizontal fit reduced pair-weighted transition
+speed from 118.0 to 60.4 mm/s and hold speed from 14.9 to 8.1 mm/s. Maximum actual
+horizontal correction acceleration was at most 12 m/s²; all targets were reachable
+and no optimizer iteration limits were reached. Mean distance from the original
+median anchors increased by 2.7–12.4 mm depending on the clip. Additional estimated
+camera displacement stayed below 0.86% of image height. Body jerk changed by less
+than 0.5% and slightly increased; v03 hold slip rose from 3.5 to 5.2 mm/s. These are
+solver comparisons on inferred contacts, not proof of better reconstruction.
+
 ## Authored VMD reference
 
 ```powershell

@@ -147,8 +147,23 @@ compensates the swing leg to preserve its original ankle position/orientation.
 
 The leg solve preserves segment lengths, caps horizontal anchor correction at
 12 cm, and lowers the pelvis by at most 8 cm using the exact vertical reach
-bound. Existing contact ramps blend touchdown/lift-off; the offline solve adds
-no causal smoothing lag, COM-driven planting, gravity or artificial body bounce.
+bound. Horizontal ankle corrections use an offline sparse constrained fit within
+each existing support interval. It balances proximity to the previous weighted
+anchor, correction acceleration, and heel/toe slip, with full-strength hold pairs
+weighted 100 times more strongly than transition pairs. A foot can settle away
+from the interval-median anchor to avoid a sharp pull toward it. Contact masks,
+anchors and weights remain unchanged and gaps are never bridged.
+
+Planned horizontal corrections are bounded to 0.5 m/s speed and 12 m/s²
+acceleration, including entry/exit and single-frame support gaps. These limits
+apply to the correction, not the dancer's motion; unreachable targets can still
+leave a reported leg-solve residual. Unsupported frames have zero horizontal
+correction. Clip endpoints do not synthesize touchdown/lift-off. The sparse
+solver supports long holds without a dense frame-by-frame matrix; iteration-limit
+results are made feasible and counted in `transition_fit_failures` in `quality.json`.
+Vertical clearance, sole pitch and toe articulation retain the same geometric
+solve. The offline solve adds no causal smoothing lag, COM-driven planting,
+gravity or artificial body bounce.
 `quality.json` reports reach residuals, pitch, slide limits, pelvis lowering and
 additional swing-clearance frames. The contact mask stays fixed for before/after
 comparisons, including with depth cleanup. Contact labels and the ankle/toe sole
@@ -193,9 +208,11 @@ Fifteen deterministic retarget/export/contact tests cover rest/asymmetric anatom
 root heading/travel, resampling/fractional FPS, planted feet, airborne preservation, encoder
 agreement, BVH timing, knee hinges, skull-center neck offsets, coherent upper-body
 lean, raw/corrected pipeline output and asset-independent skeleton preflight.
-Eight further checks in `scripts/verify_feet.py` cover double/partial support,
+Thirteen further checks in `scripts/verify_feet.py` cover double/partial support,
 swing clearance, jump preservation, opposite-leg compensation, degenerate
-contact geometry, heading invariance and unreachable-target limits.
+contact geometry, heading invariance, unreachable-target limits, bounded
+transitions across gaps and frame rates, clip endpoints, long holds, pivot heading
+and unchanged contact evidence.
 The shared codec has 11 unittest checks; the motion_encoder pose/leg regressions
 (4 + 6) also pass against the new codec.
 
@@ -218,7 +235,7 @@ playback error below 0.001 mm; optional IK body-position error below 3.5 mm
 sampled playback error below 0.001 mm. These measure export/playback agreement,
 not accuracy of the person reconstructed from video. On detected contacts in
 that clip, mean horizontal speed fell from 0.270 to 0.082 m/s; only 84/817 frames
-qualified. The current heel/toe solver with depth cleanup gives 0.069 m/s contact
+qualified. Before the v3 transition fit, heel/toe cleanup with depth cleanup gave 0.069 m/s contact
 speed and less than 0.001 mm proxy floor penetration on that same clip, against
 0.070 m/s and 14.6 mm with the earlier depth-plus-foot solver. Contact evidence is
 identical (93 heel/toe samples over 84 frames); this does not establish mesh

@@ -8,7 +8,7 @@ from scipy.spatial.transform import Rotation
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from verify_mmd import human_fixture
-from video2vmd.mmd.contacts import correct_feet, detect_contacts, foot_points, _foot_target
+from video2vmd.mmd.contacts import correct_feet, detect_contacts, foot_points, _foot_target, _bounded_contact_offsets
 from video2vmd.mmd.retarget import retarget
 
 
@@ -29,6 +29,77 @@ def evidence(motion, support):
 
 
 class FeetTests(unittest.TestCase):
+    def test_transition_bounds_include_single_frame_gaps_and_short_contacts(self):
+        for fps in (24., 30., 60.):
+            with self.subTest(fps=fps):
+                weights = np.zeros((40, 2))
+                weights[3:16] = 1.
+                weights[17:29] = 1.  # One unsupported sample must remain untouched.
+                weights[32:33] = 1.  # Degenerate short contact is still well defined.
+                offsets = np.tile([.10, -.06], (40, 1))
+                points = np.zeros((40, 2, 2))
+                points[:, :, 0] = np.linspace(0., .12, 40)[:, None]
+                actual, failures = _bounded_contact_offsets(offsets, points, weights, fps)
+                self.assertEqual(failures, 0)
+                np.testing.assert_array_equal(actual[weights.sum(axis=1) == 0], 0.)
+                self.assertLessEqual(np.linalg.norm(actual, axis=1).max(), .12+1e-9)
+                self.assertLessEqual(np.linalg.norm(np.diff(actual, axis=0), axis=1).max()*fps, .5+1e-8)
+                self.assertLessEqual(np.linalg.norm(np.diff(actual, n=2, axis=0), axis=1).max()*fps**2, 12.+1e-7)
+
+    def test_transition_fit_is_heading_equivariant(self):
+        t = np.arange(40)/30.
+        points = np.zeros((40, 2, 2))
+        points[:, :, 0] = (.03*np.sin(4*t))[:, None]
+        points[:, 1, 1] = -.15
+        offsets = np.column_stack((.06*np.cos(2*t), .04*np.sin(3*t)))
+        weights = np.ones((40, 2)); weights[:4] = weights[-4:] = 0.
+        angle = .9
+        turn = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+        original, failures = _bounded_contact_offsets(offsets, points, weights, 30.)
+        actual, turned_failures = _bounded_contact_offsets(offsets@turn.T, points@turn.T, weights, 30.)
+        self.assertEqual(failures+turned_failures, 0)
+        np.testing.assert_allclose(actual, original@turn.T, atol=1e-6)
+
+    def test_clip_endpoints_and_long_holds_do_not_invent_transitions(self):
+        for count in (1, 2, 3000):
+            with self.subTest(count=count):
+                desired = np.tile([.025, .01], (count, 1))
+                actual, failures = _bounded_contact_offsets(desired, np.zeros((count, 2, 2)),
+                                                            np.ones((count, 2)), 30.)
+                self.assertEqual(failures, 0)
+                np.testing.assert_allclose(actual, desired, atol=1e-9)
+
+    def test_transition_solver_preserves_evidence_and_airborne_frames(self):
+        motion = fixture(40)
+        motion.translations[:, 0, 1] += .1
+        motion.translations[:, 0, 0] = np.linspace(0., .08, 40)
+        contacts = evidence(motion, [1, 1, 1, 1])
+        contacts["weights"][:8] = contacts["weights"][-8:] = 0.
+        contacts["contact"][:] = contacts["weights"] > 0
+        saved = {key: np.array(value, copy=True) for key, value in contacts.items()}
+        fixed, report = correct_feet(motion, contacts)
+        self.assertEqual(report["transition_fit_failures"], 0)
+        for key, value in saved.items():
+            np.testing.assert_array_equal(contacts[key], value)
+        for values, original in ((fixed.rotations, motion.rotations), (fixed.translations, motion.translations)):
+            np.testing.assert_array_equal(values[:8], original[:8])
+            np.testing.assert_array_equal(values[-8:], original[-8:])
+        p, _ = fixed.fk()
+        delta = (p-motion.fk()[0])[:, motion.profile.index["LeftAnkle"], :][:, [0, 2]]
+        self.assertLessEqual(np.linalg.norm(np.diff(delta, n=2, axis=0), axis=1).max()*motion.fps**2, 12.+1e-6)
+
+    def test_planted_heel_pivot_preserves_ankle_heading_and_raised_toe(self):
+        motion = fixture(40)
+        ankle = motion.profile.index["LeftAnkle"]
+        motion.rotations[:, 0] = Rotation.from_euler("y", np.linspace(0., 90., 40)[:, None], degrees=True).as_quat()
+        motion.rotations[:, ankle] = Rotation.from_euler("x", 12., degrees=True).as_quat()
+        motion.translations[:, 0, 1] -= foot_points(motion)[0, 0, 1]
+        world = motion.fk()[1]
+        fixed, report = correct_feet(motion, evidence(motion, [1, 0, 0, 0]))
+        self.assertEqual(report["transition_fit_failures"], 0)
+        np.testing.assert_allclose(fixed.fk()[1][:, ankle], world[:, ankle], atol=1e-7)
+        self.assertGreater((foot_points(fixed)[:, 1, 1]-foot_points(fixed)[:, 0, 1]).min(), .02)
+
     def test_double_support_levels_sole_and_preserves_lengths(self):
         motion = fixture()
         for side in ("Left", "Right"):
