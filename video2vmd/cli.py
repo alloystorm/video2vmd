@@ -143,6 +143,15 @@ def preflight(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path 
     video: Path | None = None
     image: Path | None = None
     output_format = args.format
+    if getattr(args, "hand_motion", None):
+        hand_path = Path(args.hand_motion)
+        if check(f"hand motion       {hand_path}", hand_path.is_file(), "pass a calibrated hand_motion.npz"):
+            try:
+                from .hand_motion import load_hand_motion
+                load_hand_motion(hand_path)
+            except (ValueError, KeyError, OSError) as exc:
+                problems += 1
+                print(f"{BAD} hand motion: {exc}")
     if getattr(args, "floor", None) is not None:
         import math
         check("floor height", math.isfinite(args.floor), "--floor must be a finite number in meters")
@@ -278,7 +287,8 @@ def run(args: argparse.Namespace) -> int:
                                   device=args.device, output_format=args.format, model=args.model,
                                   foot_lock=args.foot_lock, floor=args.floor, motion_encoder=args.motion_encoder,
                                   no_preview=args.no_preview, progress=progress, ik_mode=args.ik_mode,
-                                  depth_cleanup=getattr(args,"depth_cleanup",False))
+                                  depth_cleanup=getattr(args,"depth_cleanup",False),
+                                  hand_motion=getattr(args,"hand_motion",None))
     except Exception:
         import traceback
 
@@ -332,6 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--format", choices=["vmd", "bvh"], default="vmd", help="output format (default: vmd)")
     p_run.add_argument("--mmd-profile", choices=["standard"], default="standard", help="MMD reference skeleton")
     p_run.add_argument("--model", help="PMX target skeleton/proportions for VMD/BVH (default: standard profile)")
+    p_run.add_argument("--hand-motion", help="retarget fingers from a calibrated hand_motion.npz; missing poses interpolate and clip edges hold")
     p_run.add_argument("--foot-lock", action="store_true", help="bake temporal foot-contact correction into VMD/BVH")
     p_run.add_argument("--depth-cleanup",action="store_true",help="adaptively reduce root-depth jitter using saved static-camera observations; preserves raw exports")
     p_run.add_argument("--ik-mode", choices=["fk", "ik"], default="fk", help="VMD baked FK or PMX foot-IK controls (default: fk)")

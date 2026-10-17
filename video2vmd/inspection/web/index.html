@@ -29,14 +29,14 @@
     <section class="pane motion">
       <div class="pane-title"><span>02 <b>Retargeted skeleton</b></span></div>
       <div class="viewport" id="motion-view"><canvas id="scene" aria-label="Interactive 3D skeleton. Drag to orbit, scroll to zoom."></canvas><div class="legend" id="legend"><span class="left">● Left</span><span class="right">● Right</span><span id="overlay-key" hidden>● Raw ghost</span></div><span id="frame-badge">FRAME 0000</span></div>
-      <div class="view-options"><span class="presets"><button id="front">Front</button><button id="side">Side</button><button id="reset">Reset view</button></span><label><input id="follow" type="checkbox" checked> Follow root</label><label><input id="helpers" type="checkbox"> All bones</label></div>
+      <div class="view-options"><span class="presets"><button id="front">Front</button><button id="side">Side</button><button id="reset">Reset view</button></span><select id="focus" aria-label="Skeleton focus" disabled><option value="body">Body</option><option value="left">Left hand</option><option value="right">Right hand</option></select><select id="hand-view" aria-label="Hand view" hidden><option value="camera">Source camera</option><option value="orbit">Free orbit</option></select><span id="hand-state"></span><label><input id="follow" type="checkbox" checked> Follow root</label><label><input id="helpers" type="checkbox"> All bones</label></div>
     </section>
   </main>
   <footer>
     <div class="timeline-label"><span id="time">00:00.000</span><span id="duration">00:00.000</span></div>
     <input id="timeline" type="range" min="0" max="1" step="any" value="0" aria-label="Synchronized video and motion timeline" disabled>
     <div class="transport"><div class="buttons"><button id="previous" title="Previous frame (←)" aria-label="Previous frame">|‹</button><button id="play" class="primary" title="Play / pause (Space)" disabled>Play</button><button id="next" title="Next frame (→)" aria-label="Next frame">›|</button><label class="speed"><select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><label><input id="loop" type="checkbox" checked> Loop</label><button id="sound" aria-pressed="false">Unmute</button></div><span id="status" role="status">Preparing the inspector…</span></div>
-    <div class="help">Space to play · ← → to step · Drag the 3D view to orbit · Scroll to zoom <span>Body motion only · Fingers and face are not captured</span></div>
+    <div class="help">Space to play · ← → to step · Drag the 3D view to orbit · Scroll to zoom <span id="capture-note">Body motion · Face neutral</span></div>
   </footer>
 </body>
 </html>

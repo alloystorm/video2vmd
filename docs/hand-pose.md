@@ -1,8 +1,75 @@
-# Hand-pose feasibility and proposed integration
+# Hand-pose integration and experiments
 
-Status (2026-10-17): MediaPipe and official WiLoR observation probes implemented
-and compared; hand-pose gap completion is implemented. Production finger
-retargeting is not enabled. Body extraction and existing VMD/BVH output are unchanged.
+Status (2026-10-17): cached WiLoR hands, gap completion, finger retargeting and
+VMD/BVH/motion-encoder export are connected through `v2vmd run --hand-motion`.
+Inspection includes both hand close-ups, fingertip geometry and evidence states.
+
+## Run with finger animation
+
+New WiLoR probe caches include the numeric MANO rest calibration. Add the cache
+to an ordinary body run or cached-skeleton export:
+
+```powershell
+v2vmd run --skeleton outputs/body_run/skeleton_motion.npz --hand-motion outputs/hands/v06_hand_motion.npz --model assets/mmd/ab7_160404/ab7.pmx --foot-lock --inspect
+v2vmd run --skeleton outputs/body_run/skeleton_motion.npz --hand-motion outputs/hands/v06_hand_motion.npz --format bvh --no-preview
+```
+
+Older experimental caches need one-time calibration from the user's licensed
+MANO model when completing their original WiLoR JSON:
+
+```powershell
+python scripts/complete_hand_motion.py outputs/diagnostics/hand_pose_sequence_wilor_20261017 --mano outputs/dependencies/wilor_mano/MANO_RIGHT.pkl --output outputs/calibrated_hands
+```
+
+Subsequent cached exports and inspection need neither MANO nor inference weights.
+Hand observation extraction currently uses `scripts/probe_hand_pose.py` plus
+`scripts/probe_wilor_hands.py`; `v2vmd run --hand-motion` consumes their cache and
+does not automatically run WiLoR. Use a full-rate observation cache for final
+animation rather than the twelve-frame sparse experiments.
+
+Finger retargeting preserves arm/body rotations, wrist positions and all
+translations. It maps
+canonical MANO local rotations into the target's rest axes per segment. The left
+hand uses matrix conjugation with a reflected palm basis. Identity input remains
+neutral on both sides. PMX terminal segments use their actual tail geometry;
+the standard profile uses the preceding segment as an explicit straight-tip proxy.
+Unsupported inherited/fixed-axis finger controls and nonstandard finger parenting
+are rejected for active hands. When camera-space palm observations and the body's
+`camera_world_to_camera` rotations are available, the wrist rotates to the
+observed palm frame. The frame uses the already-reflected WiLoR joints (wrist,
+index/middle/pinky MCPs), converts its two rays into the MMD world basis, then
+reconstructs a proper frame. It does not apply canonical MANO global quaternions
+directly to a target wrist. Camera and palm rotations resample by SLERP; missing
+palms interpolate/hold with the same gap policy as fingers. Old caches without
+palm geometry or skeletons without camera rotations retain body wrist orientation,
+with the fallback recorded in `hand_retargeting.json`.
+
+Hand-enabled runs save resampled `hand_motion.npz`, `hand_retargeting.json` and
+`target_motion_body.npz` in addition to the usual outputs. Raw and corrected exports
+both contain fingers; raw still means before depth/foot cleanup. Body-only is the
+neutral-finger comparison in inspection. Hand controls have dense VMD keys,
+including neutral resets. Target NPZ metadata and fitted-channel masks distinguish
+hand-enabled runs, with per-frame `hand_status` preserving observation provenance.
+`hand_wrist_status` separately records palm observation/interpolation or body fallback.
+The canonical 65-bone encoder also receives finger rotations on PMX runs.
+
+In inspection, select Left hand or Right hand under Skeleton focus and scrub/play
+against the source video. Source camera is the default hand view when camera
+geometry exists: it crops the original pinhole projection and preserves image
+aspect and orientation. Free orbit and the Front/Side buttons provide independent
+3D views; dragging switches to Free orbit. Fingertip endpoints use the saved
+local tip offsets and actual FK, so rotations of the last phalanx remain visible.
+The status shows observed/interpolated/held/unavailable; Body only shows neutral
+fingers. Hand close-ups use the side-by-side layout; camera overlap remains a body
+view and does not alter exported transforms.
+
+Verification: `scripts/verify_hand_motion.py`, `scripts/verify_hand_retargeting.py`
+and `scripts/verify_inspection.py` cover interpolation, left/right parity, neutral
+poses, thumb/tip movement, scale invariance, unchanged arm/body transforms and
+wrist positions, mirrored palm frames, moving cameras, cache reuse,
+VMD rotation readback, BVH channel reconstruction, encoder hand channels and HTTP
+fingertip buffers. This integration is validated through inspection; no Blender
+process is needed for this workflow.
 
 ## What is already available
 
@@ -145,10 +212,10 @@ outputs/dependencies/hand_probe_env/Scripts/python.exe scripts/probe_hand_pose.p
 python scripts/probe_wilor_hands.py outputs/diagnostics/new_sequence_mp --output outputs/diagnostics/new_sequence_wilor
 ```
 
-With gap completion available, the next implementation work is stable
-body-linked identity, geometric/temporal rejection and optional palm-relative
-finger retargeting. WiLoR is the stronger
-observation candidate on these clips, while MediaPipe remains a useful baseline.
+Gap completion and optional finger retargeting are implemented. Remaining
+observation improvements include stronger temporal identity and geometric pose
+rejection. WiLoR is the stronger observation candidate on these clips, while
+MediaPipe remains a useful baseline.
 
 ### Missing-hand interpolation
 
@@ -190,9 +257,13 @@ The version-1 numeric `hand_motion.npz` contains:
   original evidence even when output timing changes. `metadata` records the
   coordinate convention and interpolation policy. The cache loads with
   `allow_pickle=False` and needs no inference runtime.
+- `camera_palm_quat_xyzw` (F,2,4), `palm_status`, `source_palm_observed` and
+  `camera_palm_convention` encode the physical camera-space palm after the
+  observation backend's left-hand reflection. Older caches can gain these arrays
+  by rerunning completion on the saved WiLoR JSON without inference.
 
-These rotations remain in canonical right-MANO axes for both body-side tracks;
-the future PMX hand retargeter must convert rest axes and left-hand parity.
+These cached rotations remain in canonical right-MANO axes for both body-side
+tracks; the PMX/standard hand retargeter converts rest axes and left-hand parity.
 
 On the 60-frame v06 sequence, completion retains 116 observed hand samples,
 interpolates three missing left-hand samples and holds one leading right-hand
@@ -212,37 +283,34 @@ those remain sparse experiments, not full-video hand inference.
 - [HaMeR official setup](https://github.com/geopavlakos/hamer) also requires
   pretrained weights and `MANO_RIGHT.pkl`.
 
-## First production increment
+## Integration contract and remaining work
 
-1. Add an optional external-Python hand observation stage that can run against an
-   existing body cache and its original video. Preserve source timestamps and
-   cache observations separately in `hand_motion.npz`. Re-exporting a new target
-   must not rerun body or hand inference. Blender imports no observation packages.
-2. Track hand identity jointly with body wrists and temporal continuity. Preserve
-   raw handedness labels, association decisions and rejection reasons. Use multiple
-   crop scales/fallback detection when body wrist guidance is wrong. Deduplicate
-   detections from overlapping left/right crops.
-3. Store raw 21-point image and hand-relative 3D observations, presence/validity,
-   timestamps, crop transforms, backend/model hashes and source fingerprint. Keep
-   detector confidence, handedness confidence and derived pose-quality tests as
-   distinct fields. Do not fabricate a per-landmark confidence from handedness.
-4. Fit finger articulation in a palm-relative frame against each target's rest
-   pose. Preserve bone lengths and explicit thumb geometry. Anchor the wrist at
-   the existing body solution. Initially preserve body wrist orientation; add
-   independently gated palm orientation after coordinate/parity tests pass.
-   MediaPipe's centered "world landmarks" are not the GVHMR world frame, and its
-   normalized image z is not metric camera depth. Never splice these into body
-   joint positions or mirror quaternion components.
-5. Use the implemented gap completion to resample onto body output timestamps,
-   SLERP all bounded gaps and hold clip edges. Keep observed/interpolated/held
-   masks distinct. Any later smoothing/joint-limit stage must be separately
-   evaluated; gap completion preserves current observed pose keys.
-6. Write dense finger keys, including neutral/reset keys for opted-in hand tracks.
-   Update the fitted-channel mask and `unobserved_hands` metadata. Preserve the
-   existing all-neutral behavior when the hand option is off. Extend the optional
-   standard-profile motion-encoder path as well as PMX/VMD/BVH output.
-7. Add a hand close-up overlay to inspection, with accepted/rejected/missing states,
-   and verify terminal finger transforms in a fresh Blender process.
+The implemented cache workflow keeps observation packages outside the export and
+inspection paths. Cached exports preserve timestamps, bone lengths, thumb
+geometry and wrist positions. Available camera-space palm observations fit wrist
+orientation through the saved camera/world basis. Gap completion uses SLERP and
+retains evidence masks. VMD/BVH and the canonical motion encoder receive finger
+rotations, including neutral/reset keys. Inspection provides hand close-ups and
+terminal fingertip FK, with independent VMD/BVH readback checks.
+
+Observation extraction remains an explicit script stage. Future work can add a
+single-command extraction option, stronger temporal identity, adaptive crop
+scales, duplicate rejection and geometric quality gates. Preserve raw detector
+handedness and confidence separately from derived pose-quality measures. Evaluate
+any smoothing, joint limits or confidence-based palm rejection separately;
+the current stage preserves observed finger poses and fits available palm frames.
+
+MediaPipe's centered "world landmarks" are not the GVHMR world frame, and its
+normalized image z is not metric camera depth. Never splice these into body joint
+positions or mirror quaternion components.
+
+The full-rate v06 validation exported 817 frames with all 30 finger channels.
+Left-hand coverage is 672 observed / 145 interpolated frames; right-hand coverage
+is 718 observed / 99 interpolated frames. All hand frames are available. The
+initial finger-only result is `outputs/20261017_hands_v06/`. The orientation fix
+is `outputs/20261017_hands_palm_v06/`: finger local rotations are unchanged, wrist
+positions and all other body transforms are preserved, and frame 353's right
+palm now agrees with the camera observation. See its `hand_validation.json`.
 
 ## Acceptance checks
 
@@ -251,7 +319,7 @@ those remain sparse experiments, not full-video hand inference.
 - Mirrored inputs, crossing/overlapping hands, body turns, fast wrist rotation,
   motion blur, sleeves, hands leaving the frame and reacquisition after gaps.
 - No left/right swaps or wrist translation changes; legs/root/body transforms must
-  be identical with only finger articulation enabled.
+  be identical with hand articulation enabled, apart from observed wrist rotation.
 - Bone-length preservation, valid local xyzw rotations, bounded temporal changes,
   unchanged source timing and explicit missing-observation masks.
 - Coverage and longest missing runs on independently annotated visible-hand spans,

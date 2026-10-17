@@ -8,7 +8,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from video2vmd.hand_motion import complete_wilor_observations, save_hand_motion, STATUS_NAMES
+from video2vmd.hand_motion import complete_wilor_observations, save_hand_motion, mano_rest_joints, STATUS_NAMES
 
 
 def main():
@@ -17,6 +17,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeline", type=Path, help="NPZ with output timestamps, for one input clip")
     parser.add_argument("--candidate-source", choices=("crop", "full"), default="crop")
+    parser.add_argument("--mano", type=Path, help="MANO_RIGHT.pkl for one-time rest calibration, embedded for asset-free retargeting")
     args = parser.parse_args()
     files = sorted(args.input.glob("v[0-9]*.json")) if args.input.is_dir() else [args.input]
     if not files:
@@ -30,11 +31,16 @@ def main():
         with np.load(args.timeline, allow_pickle=False) as data:
             times = data["timestamps"]
     args.output.mkdir(parents=True)
+    calibration = mano_rest_joints(args.mano) if args.mano else None
     report = {"policy": "Timestamp SLERP inside gaps of any duration; nearest pose at leading/trailing gaps; unavailable when never observed",
               "observed_poses_unchanged": True, "clips": []}
     for path in files:
         document = json.loads(path.read_text(encoding="utf-8"))
         payload = complete_wilor_observations(document, target_timestamps=times, candidate_source=args.candidate_source)
+        if calibration is not None:
+            payload["mano_rest_joints_m"] = calibration
+        elif "mano_rest_joints_m" in document:
+            payload["mano_rest_joints_m"] = np.asarray(document["mano_rest_joints_m"], dtype=float)
         clip = path.stem
         destination = args.output/clip
         destination.mkdir()

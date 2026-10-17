@@ -119,6 +119,8 @@ def complete_wilor_observations(document, *, target_timestamps=None, candidate_s
     betas = np.full((len(frames), 2, 10), np.nan)
     observed = np.zeros((len(frames), 2), dtype=bool)
     detector_right = np.full((len(frames), 2), -1, dtype=np.int8)
+    palms = np.full((len(frames), 2, 1, 4), np.nan)
+    palm_observed = np.zeros((len(frames), 2), dtype=bool)
     for frame_index, frame in enumerate(frames):
         tracks = {hand["side"]: hand for hand in frame["hands"]}
         if len(tracks) != len(frame["hands"]) or set(tracks) != set(SIDES):
@@ -137,6 +139,19 @@ def complete_wilor_observations(document, *, target_timestamps=None, candidate_s
             betas[frame_index, hand_index] = np.asarray(candidate["mano_betas"], dtype=float).reshape(10)
             observed[frame_index, hand_index] = True
             detector_right[frame_index, hand_index] = int(candidate["is_right"])
+            if "camera_relative_xyz_m" in candidate:
+                points = np.asarray(candidate["camera_relative_xyz_m"], dtype=float)
+                if points.shape != (21, 3) or not np.isfinite(points).all():
+                    raise ValueError("Invalid WiLoR camera-space hand joints")
+                # These joints already include the official detector-side X
+                # reflection. Derive the palm AFTER reflection; canonical MANO
+                # global quaternions alone do not encode left-hand parity.
+                up, across = points[9]-points[0], points[5]-points[17]
+                if np.linalg.norm(up) > 1e-7 and np.linalg.norm(np.cross(across, up)) > 1e-10:
+                    y = up/np.linalg.norm(up)
+                    x = across-np.dot(across, y)*y; x /= np.linalg.norm(x)
+                    palms[frame_index, hand_index, 0] = Rotation.from_matrix(np.column_stack((x, y, np.cross(x, y)))).as_quat()
+                    palm_observed[frame_index, hand_index] = True
     payload = fill_hand_gaps(times, rotations, observed, betas=betas, target_timestamps=target_timestamps)
     payload["source_detector_right"] = detector_right
     payload["version"] = np.int32(1)
@@ -149,6 +164,13 @@ def complete_wilor_observations(document, *, target_timestamps=None, candidate_s
         "candidate_source": candidate_source, "gap_policy": "all_bounded_gaps_slerp; endpoints_hold_nearest",
         "unobserved_hand_policy": "identity_unavailable", "status_names": STATUS_NAMES,
     }))
+    if "mano_rest_joints_m" in document:
+        payload["mano_rest_joints_m"] = np.asarray(document["mano_rest_joints_m"], dtype=float)
+    if palm_observed.any():
+        palm = fill_hand_gaps(times, palms, palm_observed, target_timestamps=target_timestamps)
+        payload.update(camera_palm_quat_xyzw=palm["quat_xyzw"][:, :, 0],
+                       palm_status=palm["status"], source_palm_observed=palm_observed,
+                       camera_palm_convention=np.array("opencv_xright_ydown_zforward; x=pinky_to_index; y=wrist_to_middle; z=cross(x,y)"))
     return payload
 
 
@@ -157,3 +179,116 @@ def save_hand_motion(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(path, **payload)
     return path
+
+
+def mano_rest_joints(model_path):
+    """One-time licensed-model calibration; exports/viewers use the numeric cache."""
+    import torch
+    import smplx
+    from smplx.vertex_ids import vertex_ids
+    from gvhmr.utils._smpl_compat import apply
+    apply()
+    model = smplx.MANOLayer(model_path=str(model_path), is_rhand=True, use_pca=False)
+    with torch.no_grad():
+        neutral = model()
+    extra = neutral.vertices[:, list(vertex_ids["mano"].values())]
+    points = torch.cat((neutral.joints, extra), dim=1)
+    order = [0, 13, 14, 15, 16, 1, 2, 3, 17, 4, 5, 6, 18, 10, 11, 12, 19, 7, 8, 9, 20]
+    return points[0, order].cpu().numpy().astype(float)
+
+
+def load_hand_motion(path, *, require_calibration=True):
+    """Read a reusable numeric hand cache, rejecting unsupported coordinate bases."""
+    with np.load(path, allow_pickle=False) as data:
+        payload = {key: data[key] for key in data.files}
+    if int(payload.get("version", -1)) != 1:
+        raise ValueError("Unsupported hand-motion cache version")
+    metadata = json.loads(str(payload["metadata"]))
+    if metadata.get("rotation_space") != "canonical_right_MANO_local_axes_for_both_body_side_tracks":
+        raise ValueError("Unsupported hand-motion rotation convention")
+    if tuple(payload["sides"]) != SIDES:
+        raise ValueError("Hand-motion cache must contain left/right body-associated tracks")
+    q, times = np.asarray(payload["quat_xyzw"], dtype=float), _times(payload["timestamps"], "timestamps")
+    if q.shape != (len(times), 2, 16, 4) or not np.isfinite(q).all() or not np.allclose(np.linalg.norm(q, axis=-1), 1., atol=1e-6, rtol=0):
+        raise ValueError("Hand-motion cache has invalid local xyzw rotations")
+    status = payload["status"]
+    if status.shape != (len(times), 2) or not np.isin(status, range(4)).all():
+        raise ValueError("Hand-motion cache has invalid observation states")
+    if not np.array_equal(payload["available"], status != UNAVAILABLE) or not np.array_equal(payload["observed"], status == OBSERVED):
+        raise ValueError("Hand-motion observation masks disagree with status")
+    if "betas" in payload and (payload["betas"].shape != (len(times), 2, 10) or not np.isfinite(payload["betas"]).all()):
+        raise ValueError("Hand-motion cache has invalid MANO shape coefficients")
+    if "source_timestamps" in payload or "source_observed" in payload:
+        source_times = _times(payload["source_timestamps"], "source_timestamps")
+        if payload["source_observed"].shape != (len(source_times), 2):
+            raise ValueError("Hand-motion source evidence has an incompatible timeline")
+    if "mano_rest_joints_m" in payload:
+        rest = np.asarray(payload["mano_rest_joints_m"], dtype=float)
+        if rest.shape != (21, 3) or not np.isfinite(rest).all():
+            raise ValueError("Invalid MANO rest-joint calibration")
+    elif require_calibration:
+        raise ValueError("Hand cache needs rest calibration: recreate it with scripts/complete_hand_motion.py --mano PATH/TO/MANO_RIGHT.pkl")
+    if "camera_palm_quat_xyzw" in payload:
+        palm = payload["camera_palm_quat_xyzw"]
+        if (palm.shape != (len(times), 2, 4) or not np.isfinite(palm).all()
+                or not np.allclose(np.linalg.norm(palm, axis=-1), 1., atol=1e-6, rtol=0)
+                or payload["palm_status"].shape != (len(times), 2)
+                or not np.isin(payload["palm_status"], range(4)).all()
+                or payload["source_palm_observed"].shape != payload["source_observed"].shape
+                or str(payload["camera_palm_convention"]) != "opencv_xright_ydown_zforward; x=pinky_to_index; y=wrist_to_middle; z=cross(x,y)"):
+            raise ValueError("Invalid camera-space palm calibration or observation states")
+    return payload
+
+
+def resample_hand_motion(payload, timestamps):
+    """Resample completed poses while preserving the original observation states."""
+    result = fill_hand_gaps(payload["timestamps"], payload["quat_xyzw"], payload["available"],
+                            betas=payload.get("betas"), target_timestamps=timestamps)
+    original_times = np.asarray(payload.get("source_timestamps", payload["timestamps"]))
+    original_mask = np.asarray(payload.get("source_observed", payload["observed"]))
+    result["status"] = _evidence_status(original_times, original_mask, result["timestamps"])
+    result["observed"] = result["status"] == OBSERVED
+    result["available"] = result["status"] != UNAVAILABLE
+    for key in ("source_timestamps", "source_observed", "source_detector_right", "version", "sides", "metadata", "mano_rest_joints_m"):
+        if key in payload:
+            result[key] = np.array(payload[key], copy=True)
+    if "camera_palm_quat_xyzw" in payload:
+        palm = fill_hand_gaps(payload["timestamps"], payload["camera_palm_quat_xyzw"][:, :, None],
+                              payload["palm_status"] != UNAVAILABLE, target_timestamps=timestamps)
+        result["camera_palm_quat_xyzw"] = palm["quat_xyzw"][:, :, 0]
+        result["palm_status"] = _evidence_status(original_times, payload["source_palm_observed"], result["timestamps"])
+        for key in ("source_palm_observed", "camera_palm_convention"):
+            result[key] = np.array(payload[key], copy=True)
+    return result
+
+
+def _evidence_status(original_times, original_mask, query):
+    status = np.full((len(query), 2), UNAVAILABLE, dtype=np.uint8)
+    for hand in range(2):
+        anchors = original_times[original_mask[:, hand]]
+        if not len(anchors):
+            continue
+        status[:, hand] = INTERPOLATED
+        status[(query < anchors[0]) | (query > anchors[-1]), hand] = HELD
+        at = np.searchsorted(anchors, query)
+        lo, hi = np.clip(at-1, 0, len(anchors)-1), np.clip(at, 0, len(anchors)-1)
+        exact = np.minimum(abs(query-anchors[lo]), abs(query-anchors[hi])) <= 1e-9
+        status[exact, hand] = OBSERVED
+    return status
+
+
+def world_to_camera_rotations(path, timestamps):
+    """Numeric camera-to-world bridge on the same relative clock as body export."""
+    with np.load(path, allow_pickle=False) as data:
+        if "camera_world_to_camera" not in data:
+            return None
+        rotations = np.asarray(data["camera_world_to_camera"], dtype=float)
+        times = _times(data["timestamps"], "camera timestamps")
+    if (rotations.shape != (len(times), 3, 3) or not np.isfinite(rotations).all()
+            or not np.allclose(rotations @ rotations.swapaxes(-1, -2), np.eye(3), atol=1e-4)
+            or not np.allclose(np.linalg.det(rotations), 1., atol=1e-4)):
+        raise ValueError("Invalid saved world-to-camera rotations for hand orientation")
+    times = times-times[0]
+    if len(times) == 1:
+        return np.repeat(rotations, len(timestamps), axis=0)
+    return Slerp(times, Rotation.from_matrix(rotations))(np.clip(timestamps, times[0], times[-1])).as_matrix()

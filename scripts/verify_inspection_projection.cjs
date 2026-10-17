@@ -24,4 +24,19 @@ assert.equal(P.pinhole([0,0,-1],k,rect,[0,0]),null);
 // A Y-up manual camera places higher joints above its principal point.
 let manual=P.manual([0,1,0],[0,0,0],{...settings,fov:60},rect);
 assert.ok(manual[1]<rect.h*.5);
-console.log('Projection checks passed: letterboxing, resizing, pan, FOV, near clipping and Y-up camera.');
+// Source-camera hand crop preserves screen directions, including camera Y down,
+// perspective and pixel aspect. Principal point cancels when centering the crop.
+const handPoints=[[.2,-.1,4],[-.1,.2,4.1],[.3,.2,3.8]];
+const handK=[2,1.25,.5,.5],aspect=.625;
+const crop=P.handCloseup(handPoints,handK,aspect,600,800,.25);
+const a=crop(handPoints[0]),b=crop(handPoints[1]);
+const originalA=P.pinhole(handPoints[0],handK,{x:0,y:0,w:1000,h:1600},[0,0]);
+const originalB=P.pinhole(handPoints[1],handK,{x:0,y:0,w:1000,h:1600},[0,0]);
+near((b[0]-a[0])/(b[1]-a[1]),(originalB[0]-originalA[0])/(originalB[1]-originalA[1]));
+assert.ok(b[0]<a[0] && b[1]>a[1]);
+const shifted=P.handCloseup(handPoints,[2,1.25,.1,.8],aspect,600,800,.25);
+near(shifted(handPoints[0])[0],a[0]);near(shifted(handPoints[0])[1],a[1]);
+const resized=P.handCloseup(handPoints,handK,aspect,300,400,.25);
+near(resized(handPoints[0])[0],a[0]/2);near(resized(handPoints[0])[1],a[1]/2);
+assert.equal(crop([0,0,-1]),null);
+console.log('Projection checks passed: letterboxing, resizing, pan, FOV, near clipping, Y-up camera and source-camera hand crops.');

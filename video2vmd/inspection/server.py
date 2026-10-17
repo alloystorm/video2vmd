@@ -32,7 +32,12 @@ def load_target(path: Path) -> TargetMotion:
         profile = MMDProfile(meta["profile"], tuple(str(n) for n in data["bone_names"]),
                              data["parents"], data["rest_positions_m"], {},
                              float(meta["meters_per_vmd_unit"]))
-        return TargetMotion(profile, data["quat_xyzw"], data["translations_m"], float(data["fps"]))
+        profile.identity = meta["profile_hash"]
+        return TargetMotion(profile, data["quat_xyzw"], data["translations_m"], float(data["fps"]),
+                            data["hand_channels"] if "hand_channels" in data else None,
+                            data["hand_status"] if "hand_status" in data else None,
+                            data["hand_tip_offsets_m"] if "hand_tip_offsets_m" in data else None,
+                            data["hand_wrist_status"] if "hand_wrist_status" in data else None)
 
 
 def resolve_source(run_dir: Path, override: Path | None = None) -> Path | None:
@@ -102,6 +107,8 @@ class Inspection:
     camera_poses: bytes | None = None
     reconstruction: bytes | None = None
     world_reconstruction: bytes | None = None
+    hand_tips: bytes | None = None
+    camera_hand_tips: bytes | None = None
 
 
 def prepare_inspection(run_dir: Path, source: Path | None = None, *, transcode=True) -> Inspection:
@@ -116,6 +123,13 @@ def prepare_inspection(run_dir: Path, source: Path | None = None, *, transcode=T
                 or not np.array_equal(raw.profile.parents, corrected.profile.parents)):
             raise ValueError("Raw and corrected target motion have incompatible timelines/hierarchies")
         motions["raw"] = raw
+    body_path = run_dir/"target_motion_body.npz"
+    if body_path.is_file():
+        body_only = load_target(body_path)
+        if (body_only.profile.names != corrected.profile.names or body_only.fps != corrected.fps
+                or body_only.n_frames != corrected.n_frames or not np.array_equal(body_only.profile.parents, corrected.profile.parents)):
+            raise ValueError("Body comparison has incompatible timelines/hierarchies")
+        motions["body"] = body_only
     source = resolve_source(run_dir, source)
     media, kind = (prepare_media(source, run_dir) if transcode else
                    (source, "image" if source and paths.is_image(source) else "video" if source else None))
@@ -123,13 +137,31 @@ def prepare_inspection(run_dir: Path, source: Path | None = None, *, transcode=T
     body = {profile.root, "Center", "HipMaster", "Torso", "Torso1", "Torso2", "Neck", "Head"}
     body.update(side + part for side in ("Left", "Right") for part in
                 ("Shoulder", "Arm", "Elbow", "Wrist", "Leg", "Knee", "Ankle", "Toe"))
+    if corrected.hand_channels is not None:
+        body.update(name for i, name in enumerate(profile.names) if corrected.hand_channels[i])
     visible = set()
     for name in body & profile.index.keys():
         index = profile.index[name]
         while index >= 0:
             visible.add(index)
             index = int(profile.parents[index])
-    positions = [motion.fk()[0].astype("<f4") for motion in motions.values()]
+    transforms = [motion.fk() for motion in motions.values()]
+    positions = [p.astype("<f4") for p, _ in transforms]
+    tips, hands, tip_values = None, None, None
+    if corrected.hand_channels is not None:
+        tip_bones = np.flatnonzero(np.linalg.norm(corrected.hand_tip_offsets, axis=1) > 1e-9)
+        tip_values = [p[:, tip_bones]+np.einsum("tbij,bj->tbi", r[:, tip_bones], corrected.hand_tip_offsets[tip_bones])
+                      for p, r in transforms]
+        tips = np.asarray(tip_values, dtype="<f4").tobytes()
+        hands = {"tip_bones": tip_bones.tolist(), "status": corrected.hand_status.tolist(), "sides": {}}
+        if corrected.hand_wrist_status is not None:
+            hands["wrist_status"] = corrected.hand_wrist_status.tolist()
+        for side in ("Left", "Right"):
+            bones = [i for i, name in enumerate(profile.names) if corrected.hand_channels[i] and name.startswith(side)]
+            wrist = profile.index[side+"Wrist"]
+            hands["sides"][side.lower()] = {"wrist": wrist, "bones": [wrist]+bones,
+                "tips": [i for i, b in enumerate(tip_bones) if profile.names[b].startswith(side)],
+                "span": max(.18, float(np.linalg.norm(profile.rest[bones]-profile.rest[wrist], axis=1).max())*1.8) if bones else .25}
     floor = float(np.percentile(positions[0][:, [profile.index[s+"Toe"] for s in ("Left", "Right")], 1], 5))
     # Contiguous little-endian float32: variant, frame, bone, xyz.
     metadata = {
@@ -141,6 +173,7 @@ def prepare_inspection(run_dir: Path, source: Path | None = None, *, transcode=T
         "height": max(.5, float(np.ptp(profile.rest[[profile.index[n] for n in body & profile.index.keys()], 1])) + .18),
         "variants": list(motions), "source": source.name if source else None, "mediaKind": kind,
         "format": "float32-le / variant,frame,bone,xyz", "up": "+Y", "units": "meters",
+        "hands": hands,
     }
     from .camera import camera_inspection, world_reconstruction
     skeleton = run_dir / "skeleton_motion.npz"
@@ -152,14 +185,14 @@ def prepare_inspection(run_dir: Path, source: Path | None = None, *, transcode=T
         except (ValueError,KeyError) as exc:
             print(f"Inspection: source reconstruction unavailable ({exc}).")
         try:
-            camera = camera_inspection(skeleton, motions)
+            camera = camera_inspection(skeleton, motions, tip_values)
         except (ValueError, KeyError) as exc:
             print(f"Inspection: estimated camera unavailable ({exc}); manual alignment is available.")
     metadata["camera"] = camera.metadata if camera else None
     metadata["reconstruction"] = reconstruction[0] if reconstruction else None
     return Inspection(metadata, b"".join(p.tobytes() for p in positions), media,
                       camera.targets if camera else None, camera.reconstruction if camera else None,
-                      reconstruction[1] if reconstruction else None)
+                      reconstruction[1] if reconstruction else None, tips, camera.hand_tips if camera else None)
 
 
 def byte_range(value: str, size: int) -> tuple[int, int]:
@@ -246,6 +279,10 @@ def make_server(inspection: Inspection, port=0) -> ThreadingHTTPServer:
                 data, mime = inspection.reconstruction, "application/octet-stream"
             elif route == "/api/world-reconstruction.bin" and inspection.world_reconstruction is not None:
                 data, mime = inspection.world_reconstruction, "application/octet-stream"
+            elif route == "/api/hand-tips.bin" and inspection.hand_tips is not None:
+                data, mime = inspection.hand_tips, "application/octet-stream"
+            elif route == "/api/camera-hand-tips.bin" and inspection.camera_hand_tips is not None:
+                data, mime = inspection.camera_hand_tips, "application/octet-stream"
             else:
                 self.send_error(404)
                 return

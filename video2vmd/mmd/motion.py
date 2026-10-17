@@ -15,6 +15,10 @@ class TargetMotion:
     rotations: np.ndarray  # (T,B,4), xyzw
     translations: np.ndarray  # (T,B,3), animated local offsets, meters
     fps: float = 30.0
+    hand_channels: np.ndarray | None = None
+    hand_status: np.ndarray | None = None
+    hand_tip_offsets: np.ndarray | None = None
+    hand_wrist_status: np.ndarray | None = None
 
     def __post_init__(self):
         self.rotations = np.asarray(self.rotations, dtype=np.float64)
@@ -30,6 +34,18 @@ class TargetMotion:
             raise ValueError("Target transforms must be finite")
         if not np.allclose(np.linalg.norm(self.rotations, axis=2), 1., atol=1e-6):
             raise ValueError("Target rotations must be unit xyzw quaternions")
+        if self.hand_channels is not None:
+            self.hand_channels = np.asarray(self.hand_channels, dtype=bool)
+            self.hand_status = np.asarray(self.hand_status)
+            self.hand_tip_offsets = np.asarray(self.hand_tip_offsets, dtype=float)
+            if (self.hand_channels.shape != (count,) or self.hand_status.shape != (len(self.rotations), 2)
+                    or not np.isin(self.hand_status, range(4)).all()
+                    or self.hand_tip_offsets.shape != (count, 3) or not np.isfinite(self.hand_tip_offsets).all()):
+                raise ValueError("Invalid hand channels, observation states or fingertip geometry")
+        if self.hand_wrist_status is not None:
+            self.hand_wrist_status = np.asarray(self.hand_wrist_status)
+            if self.hand_wrist_status.shape != (len(self.rotations), 2) or not np.isin(self.hand_wrist_status, range(4)).all():
+                raise ValueError("Invalid wrist observation states")
 
     @property
     def n_frames(self):
@@ -54,6 +70,18 @@ class TargetMotion:
         fitted = {self.profile.root, "HipMaster", "Torso", "Torso2", "Neck"}
         fitted.update(side+part for side in ("Left", "Right") for part in
                       ("Shoulder", "Arm", "Elbow", "Wrist", "Leg", "Knee", "Ankle"))
+        extras = {}
+        hands_enabled = self.hand_channels is not None
+        hand_available = False
+        if hands_enabled:
+            extras = {"hand_channels": self.hand_channels, "hand_status": self.hand_status,
+                      "hand_tip_offsets_m": self.hand_tip_offsets}
+            if self.hand_wrist_status is not None:
+                extras["hand_wrist_status"] = self.hand_wrist_status
+            for side_index, side in enumerate(("Left", "Right")):
+                if np.any(self.hand_status[:, side_index] > 0):
+                    hand_available = True
+                    fitted.update(name for i, name in enumerate(self.profile.names) if self.hand_channels[i] and name.startswith(side))
         np.savez_compressed(path, version=np.int32(1), bone_names=np.array(self.profile.names),
                             parents=self.profile.parents, rest_positions_m=self.profile.rest,
                             quat_xyzw=self.rotations, translations_m=self.translations,
@@ -61,10 +89,12 @@ class TargetMotion:
                             observed=np.array([n in fitted for n in self.profile.names]),
                             metadata=json.dumps({"profile": self.profile.name, "profile_hash": self.profile.identity,
                                                  "meters_per_vmd_unit": self.profile.unit, "quaternion": "xyzw",
-                                                 "up": "+Y", "unobserved_hands": True,
+                                                 "up": "+Y", "unobserved_hands": not hand_available,
+                                                 "hands_enabled": hands_enabled,
+                                                 "wrist_orientation": "camera_observed_palm" if self.hand_wrist_status is not None and np.any(self.hand_wrist_status) else "body_landmarks",
                                                  "neck_policy": "rest_relative_chest_to_head_axis",
                                                  "head_orientation": "inherits_neck_no_independent_observation",
-                                                 "observed_semantics": "fitted_from_body_landmarks_not_full_rotation_observations"}))
+                                                 "observed_semantics": "fitted_channels; per_frame_hand_evidence_is_hand_status" if hands_enabled else "fitted_from_body_landmarks_not_full_rotation_observations"}), **extras)
 
 
 def resample_source(motion, fps=30.0):

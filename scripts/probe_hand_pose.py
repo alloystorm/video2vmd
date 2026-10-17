@@ -95,7 +95,8 @@ def main():
                 frame_indices = ([round(float(t)*fps) for t in np.linspace(timestamps[0], timestamps[-1], args.samples+2)[1:-1]]
                                  if args.time_range is None else range(round(args.time_range[0]*fps),
                                      min(round(args.time_range[1]*fps), int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))))
-                for frame_index in frame_indices:
+                sheet_frames = set(np.linspace(0, len(frame_indices)-1, min(12, len(frame_indices))).astype(int))
+                for frame_step, frame_index in enumerate(frame_indices):
                     if round(cap.get(cv2.CAP_PROP_POS_FRAMES)) != frame_index:
                         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
                     ok, frame = cap.read()
@@ -129,6 +130,8 @@ def main():
                                "body_wrist_xy": wrist.tolist(), "forearm_px": forearm,
                                "full_match": fi, "crop_match": ci, "crop_candidates": candidates}
                         frame_rows.append(row)
+                        if frame_step not in sheet_frames:
+                            continue
                         tile = cv2.resize(crop, (256, 256))
                         for index, hand in enumerate(candidates):
                             xy = (np.asarray(hand["image_xy_px"])-[x0, y0])/[x1-x0, y1-y0]*256

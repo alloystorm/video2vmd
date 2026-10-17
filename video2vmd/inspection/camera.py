@@ -14,6 +14,7 @@ class CameraInspection:
     metadata: dict
     targets: bytes
     reconstruction: bytes
+    hand_tips: bytes | None = None
 
 
 def world_reconstruction(path, frames, fps):
@@ -36,7 +37,7 @@ def world_reconstruction(path, frames, fps):
             "height":max(.5,float(np.ptp(values[0,:,1]))+.18)},values.astype("<f4").tobytes()
 
 
-def camera_inspection(path, motions):
+def camera_inspection(path, motions, hand_tips=None):
     """Old NPZs have no camera geometry; manual overlap remains available."""
     with np.load(path, allow_pickle=False) as data:
         keys = {"camera_joints_3d", "camera_intrinsics", "camera_image_size", "camera_world_to_camera"}
@@ -83,17 +84,19 @@ def camera_inspection(path, motions):
     if not np.isfinite(scale) or scale <= 0:
         raise ValueError("Degenerate camera alignment skeleton")
     anchor = reference.fk()[0][:, reference.profile.index["HipMaster"]]
-    targets = []
-    for motion in motions.values():
+    def to_camera(points):
         # Undo MMD's X reflection and retarget scale. Anchor both variants to
         # the SAME raw pelvis so corrected root displacement stays visible.
-        local = (motion.fk()[0]-anchor[:,None]) * [-1,1,1] / scale
-        targets.append((np.einsum("tij,tbj->tbi", r, local)+cam[:,0,None]).astype("<f4").tobytes())
+        local = (points-anchor[:,None]) * [-1,1,1] / scale
+        return (np.einsum("tij,tbj->tbi", r, local)+cam[:,0,None]).astype("<f4").tobytes()
+    targets = [to_camera(motion.fk()[0]) for motion in motions.values()]
     normalized = k[:, [0,1,0,1], [0,1,2,2]] / size[[0,1,0,1]]
     return CameraInspection({
-        "intrinsics": normalized.tolist(), "convention": "OpenCV +X right, +Y down, +Z forward",
+        "intrinsics": normalized.tolist(), "image_aspect": float(size[0]/size[1]),
+        "convention": "OpenCV +X right, +Y down, +Z forward",
         "names": names, "parents": SMPL_PARENTS,
         "fov": float(np.degrees(2*np.arctan(.5/np.median(normalized[:,1])))),
         "distance": float(max(.2, np.median(cam[:,0,2]))),
         "alignment": "estimated camera; target proportions aligned to raw pelvis and source leg scale",
-    }, b"".join(targets), cam.astype("<f4").tobytes())
+    }, b"".join(targets), cam.astype("<f4").tobytes(),
+        b"".join(to_camera(points) for points in hand_tips) if hand_tips is not None else None)

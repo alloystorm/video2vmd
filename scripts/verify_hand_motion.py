@@ -7,7 +7,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from video2vmd.hand_motion import fill_hand_gaps, complete_wilor_observations, OBSERVED, INTERPOLATED, HELD, UNAVAILABLE
+from video2vmd.hand_motion import fill_hand_gaps, complete_wilor_observations, resample_hand_motion, OBSERVED, INTERPOLATED, HELD, UNAVAILABLE
 
 
 def source(count=5, joints=2):
@@ -109,6 +109,35 @@ class HandMotionTests(unittest.TestCase):
         np.testing.assert_array_equal(data["status"][:, 1], UNAVAILABLE)
         np.testing.assert_array_equal(data["source_detector_right"][:, 0], [0, -1, 1])
         self.assertEqual(data["quat_xyzw"].shape, (3, 2, 16, 4))
+
+    def test_camera_palms_use_reflected_joints_and_interpolate_separately(self):
+        # Canonical local rotations are identical; physical left/right palms
+        # differ by the actual reflected geometry in the saved camera points.
+        points = np.zeros((21, 3)); points[5] = [1, 1, 0]; points[9] = [0, 1, 0]; points[17] = [-1, 1, 0]
+        frames = []
+        for frame, angle in enumerate((0., 45., 90.)):
+            rotation = Rotation.from_euler("z", angle, degrees=True).as_matrix()
+            tracks = []
+            for side in ("left", "right"):
+                reflected = (points @ rotation.T)*([-1, 1, 1] if side == "left" else [1, 1, 1])
+                candidate = {"mano_global_orient_matrix": rotation[None].tolist(),
+                             "mano_pose_matrices": np.repeat(np.eye(3)[None], 15, axis=0).tolist(),
+                             "mano_betas": [0.]*10, "is_right": side == "right",
+                             "camera_relative_xyz_m": reflected.tolist()}
+                tracks.append({"side": side, "crop_match": 0 if frame != 1 else None, "crop_candidates": [candidate]})
+            frames.append({"time_s": float(frame), "hands": tracks})
+        data = complete_wilor_observations({"observations": frames})
+        right = Rotation.from_quat(data["camera_palm_quat_xyzw"][:, 1]).as_matrix()
+        left = Rotation.from_quat(data["camera_palm_quat_xyzw"][:, 0]).as_matrix()
+        expected = Rotation.from_euler("z", [[0], [45], [90]], degrees=True).as_matrix()
+        np.testing.assert_allclose(right, expected, atol=1e-10)
+        np.testing.assert_allclose(left[:, :, :2], np.diag([-1., 1, 1]) @ expected[:, :, :2], atol=1e-10)
+        np.testing.assert_allclose(np.linalg.det(left), 1.)
+        for _ in range(2):
+            data = resample_hand_motion(data, [0., .5, 1., 1.5, 2.])
+            np.testing.assert_array_equal(data["palm_status"][:, 0], [OBSERVED, INTERPOLATED, INTERPOLATED, INTERPOLATED, OBSERVED])
+        np.testing.assert_allclose(Rotation.from_quat(data["camera_palm_quat_xyzw"][1, 1]).as_matrix(),
+                                   Rotation.from_euler("z", 22.5, degrees=True).as_matrix(), atol=1e-10)
 
 
 if __name__ == "__main__":

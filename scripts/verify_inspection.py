@@ -54,6 +54,46 @@ class InspectionTests(unittest.TestCase):
         self.assertGreater(np.max(np.abs(data[0]-data[1])), .05)
         self.assertIsNone(inspection.media)
 
+    def test_hand_closeup_metadata_and_http_tips_match_saved_finger_fk(self):
+        from verify_hand_retargeting import hand_fixture
+        from video2vmd.mmd.hands import retarget_hands
+        _, motion, payload = hand_fixture(10)
+        payload["quat_xyzw"][:, :, 3] = Rotation.from_euler("z", 40., degrees=True).as_quat()
+        corrected, _ = retarget_hands(motion, payload)
+        corrected.save(self.root/"target_motion.npz")
+        motion.save(self.root/"target_motion_body.npz")
+        _, camera_joints = self.camera_fixture()
+        inspection = prepare_inspection(self.root, transcode=False)
+        hands = inspection.metadata["hands"]
+        self.assertEqual(len(hands["sides"]["left"]["bones"]), 16)
+        self.assertEqual(len(hands["sides"]["right"]["tips"]), 5)
+        self.assertEqual(inspection.metadata["variants"], ["corrected", "raw", "body"])
+        tip_values = np.frombuffer(inspection.hand_tips, dtype="<f4").reshape(3, 10, 10, 3)
+        p, r = corrected.fk(); indices = hands["tip_bones"]
+        np.testing.assert_allclose(tip_values[0], p[:, indices]+np.einsum("tbij,bj->tbi", r[:, indices], corrected.hand_tip_offsets[indices]), atol=1e-7)
+        camera_tips = np.frombuffer(inspection.camera_hand_tips, dtype="<f4").reshape(3, 10, 10, 3)
+        camera_poses = np.frombuffer(inspection.camera_poses, dtype="<f4").reshape(3, 10, -1, 3)
+        profile = corrected.profile
+        target_leg = np.mean([np.linalg.norm(profile.position(s+"Leg")-profile.position(s+"Knee"))
+                              + np.linalg.norm(profile.position(s+"Knee")-profile.position(s+"Ankle")) for s in ("Left", "Right")])
+        # Source fixture leg length is exactly one meter, camera R=diag(1,-1,-1).
+        expected_tip_delta = (tip_values[0]-p[:, indices])*[-1, -1, -1]/target_leg
+        np.testing.assert_allclose(camera_tips[0]-camera_poses[0][:, indices], expected_tip_delta, atol=4e-7)
+        self.assertEqual(inspection.metadata["camera"]["image_aspect"], 1000/1600)
+        server = make_server(inspection)
+        worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            for route, expected_buffer in (("/api/hand-tips.bin", inspection.hand_tips),
+                                           ("/api/camera-hand-tips.bin", inspection.camera_hand_tips)):
+                connection.request("GET", route)
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), expected_buffer)
+            connection.close()
+        finally:
+            server.shutdown(); server.server_close(); worker.join(timeout=2)
+
     def test_old_run_without_raw_and_mismatched_comparison(self):
         path = self.root / "target_motion_raw.npz"
         path.unlink()

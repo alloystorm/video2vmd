@@ -30,6 +30,7 @@ v2vmd inspect outputs/<run>  # reopen saved motion + original video in a local b
 v2vmd run --image assets/image/pose.jpg --model assets/mmd/character.pmx
 v2vmd doctor --skeleton outputs/<run>/skeleton_motion.npz
 v2vmd run --skeleton outputs/<run>/skeleton_motion.npz --model character.pmx --foot-lock
+v2vmd run --skeleton outputs/<run>/skeleton_motion.npz --hand-motion outputs/hands/hand_motion.npz --model character.pmx --inspect
 v2vmd run --skeleton outputs/<run>/skeleton_motion.npz --format bvh --no-preview
 v2vmd run --output-dir DIR --progress-jsonl FILE --no-preview
 ```
@@ -53,8 +54,14 @@ or inference weights. Extraction is expensive; reuse the NPZ when changing targe
   optional canonical 404-column `motion_encoder.npy`.
 - With `--depth-cleanup`: `skeleton_motion_corrected.npz`, `target_motion_depth.npz`,
   and `depth_cleanup.json` / `.npz`. Preserve original source and raw exports.
+- With `--hand-motion`: resampled `hand_motion.npz`, `hand_retargeting.json` and
+  `target_motion_body.npz` for a neutral-finger comparison in inspection.
 
-Keep fingers/face neutral until an observation backend exists. The neck uses a
+Keep fingers neutral unless a calibrated observation cache is supplied; face
+remains neutral. Hand retargeting preserves wrist positions, arm/body rotations
+and all translations; available camera-space palms fit wrist orientation through
+the saved camera/world basis. See `docs/hand-pose.md` for observation/export conventions.
+The neck uses a
 rest-relative chest-to-head axis; the head follows it without independent gaze
 tracking. Do not aim along SMPL's short skull-center offset. Keep source timing,
 coordinate bases, root ownership and quaternion conventions explicit.
@@ -67,6 +74,8 @@ coordinate bases, root ownership and quaternion conventions explicit.
   Translate all joints together, preserve timestamps/articulation, protect coherent
   motion, bound reprojection, and evaluate all stages on the same raw contact mask.
 - `video2vmd/mmd/`: profiles, body retargeting, contacts, export, preview, pipeline.
+- `video2vmd/hand_motion.py`, `mmd/hands.py`: hand cache, gap SLERP and finger
+  retargeting from canonical MANO axes into target rest axes.
 - `video2vmd/inspection/`: localhost viewer, source proxy, HTTP byte ranges,
   raw/corrected FK buffers, estimated/manual camera overlap and video-clock-driven
   canvas playback. No training imports. Letterboxing must match the media's
@@ -103,6 +112,7 @@ Run `python scripts/verify_depth_cleanup.py` for depth-cleanup or related pipeli
 Run `python scripts/verify_feet.py` for contact, heel/toe pitch or leg-solver changes.
 Run `python scripts/verify_noise_analysis.py` for batch-analysis metric changes.
 Run `python scripts/verify_hand_motion.py` for hand observation/cache or gap-interpolation changes.
+Run `python scripts/verify_hand_retargeting.py` for finger rest-axis, export or hand-pipeline changes.
 See `docs/noise-analysis.md` for reproducible multi-video processing and ablations.
 `scripts/cache_inspection_camera.py` can add camera arrays to an older run using
 its matching trusted local GVHMR cache; it needs SMPL-X but does not rerun inference.

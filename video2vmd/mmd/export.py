@@ -19,7 +19,10 @@ def write_vmd(path, motion, ik_mode="fk"):
         moving = np.any(np.abs(motion.rotations[:, i, :3]) > 1e-8) or np.any(np.abs(motion.translations[:, i]) > 1e-8)
         # Explicit neutral Head keys also replace an older counter-rotation
         # when this motion is loaded onto an already animated character.
-        if not moving and name not in (profile.root, "Head"):
+        hand_key = motion.hand_channels is not None and motion.hand_channels[i]
+        if name in ("LeftWrist", "RightWrist") and motion.hand_wrist_status is not None:
+            hand_key = hand_key or np.any(motion.hand_wrist_status[:, 0 if name.startswith("Left") else 1] != 0)
+        if not moving and not hand_key and name not in (profile.root, "Head"):
             continue
         if name not in profile.serialized:
             raise ValueError(f"Animated helper {name} has no VMD mapping; compose it into a supported control first")

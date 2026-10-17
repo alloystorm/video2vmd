@@ -129,6 +129,8 @@ def main():
                "coordinate_note": "3D joints are MANO camera-basis predictions with X reflected for left hands; pose matrices retain the canonical right-hand model convention",
                "evaluation_note": "Same frames, body-wrist gates and crops as baseline. Matches are not annotated pose accuracy. Detector confidence is not finger confidence.",
                "clips": []}
+    with torch.no_grad():
+        rest_joints = probe.model.mano().joints[0].cpu().numpy()
     for path in sorted(args.baseline.glob("v[0-9]*.json")):
         baseline = json.loads(path.read_text(encoding="utf-8"))
         clip = baseline["clip"]
@@ -138,7 +140,8 @@ def main():
         cap = cv2.VideoCapture(baseline["source_video"])
         rows, tiles = [], []
         try:
-            for sample in baseline["observations"]:
+            sheet_frames = set(np.linspace(0, len(baseline["observations"])-1, min(12, len(baseline["observations"]))).astype(int))
+            for frame_step, sample in enumerate(baseline["observations"]):
                 if round(cap.get(cv2.CAP_PROP_POS_FRAMES)) != sample["frame_index"]:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, sample["frame_index"])
                 ok, frame = cap.read()
@@ -159,6 +162,8 @@ def main():
                     hands.append({"side": previous["side"], "crop_valid": True, "full_match": fi, "crop_match": ci,
                                   "crop_candidates": candidates, "body_wrist_xy": wrist.tolist(),
                                   "crop_xyxy": previous["crop_xyxy"]})
+                    if frame_step not in sheet_frames:
+                        continue
                     tile = cv2.resize(crop, (256, 256))
                     for index, hand in enumerate(candidates):
                         xy = (np.asarray(hand["image_xy_px"])-[x0, y0])/[x1-x0, y1-y0]*256
@@ -184,9 +189,10 @@ def main():
                   "mediapipe_full_matches": baseline["full_matches"], "mediapipe_crop_matches": baseline["crop_matches"],
                   "elapsed_s": time.monotonic()-started, "source_sha256": sha256(baseline["source_video"]),
                   "baseline_sha256": sha256(path)}
-        document = {**result, "observations": rows}
+        document = {**result, "observations": rows, "mano_rest_joints_m": rest_joints.tolist()}
         (args.output/(clip+".json")).write_text(json.dumps(document, indent=2)+"\n", encoding="utf-8")
         completed = complete_wilor_observations(document)
+        completed["mano_rest_joints_m"] = rest_joints
         save_hand_motion(args.output/(clip+"_hand_motion.npz"), completed)
         if tiles:
             while len(tiles) % 4:

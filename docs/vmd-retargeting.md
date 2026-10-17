@@ -24,6 +24,9 @@ v2vmd run --video assets/video/dance.mp4 --format vmd --device cuda --foot-lock
 # Reuse extraction with your PMX character. Extract ZIP archives first.
 v2vmd run --skeleton outputs/previous/skeleton_motion.npz --format vmd --model assets/mmd/character.pmx --foot-lock
 
+# Add cached fingers with rest-axis conversion and missing-pose interpolation.
+v2vmd run --skeleton outputs/previous/skeleton_motion.npz --hand-motion outputs/hands/hand_motion.npz --model assets/mmd/character.pmx --inspect
+
 # Optional PMX foot-IK controls; baked FK is the default.
 v2vmd run --skeleton outputs/previous/skeleton_motion.npz --format vmd --model assets/mmd/character.pmx --foot-lock --ik-mode ik
 
@@ -79,15 +82,19 @@ nearest whole frame. A 60 fps input is resampled, rather than relabeled 30 fps.
 Root trajectory/heading live on `Master` for the standard profile, or `Center`
 when the PMX has no Master. Other root translation controls remain neutral.
 Pelvis articulation and chest rotation have separate ownership. The unspecifiable
-synthetic `Torso1` helper remains neutral and is omitted from VMD. No fingers,
-facial expressions, eye movement, hair or clothing animation are estimated.
+synthetic `Torso1` helper remains neutral and is omitted from VMD. Fingers remain
+neutral by default; `--hand-motion` adds cached WiLoR finger articulation with
+missing-pose interpolation (see [hand-pose.md](hand-pose.md)). Facial expressions,
+eye movement, hair and clothing animation are not estimated.
 The neck fits a virtual upper-chest-to-head axis against the target rest pose.
 SMPL's short neck-to-head offset points toward the skull center; aiming the MMD
 neck along it would add an anatomical bias as a large forward bend. The head
 stays neutral locally and follows the fitted neck, without a second opposite
 rotation to force world-upright heading. This remains a coarse position-based
 estimate, not independent head/gaze tracking. Wrists use only the available
-coarse hand direction. Joint-position-only input cannot resolve full limb twist
+coarse hand direction by default. With calibrated camera-space palm observations
+and saved world-to-camera rotations, `--hand-motion` fits wrist orientation while
+preserving wrist position and the body's arm solution. Joint-position-only input cannot resolve full limb twist
 or detailed head/hand orientation.
 
 VMD translations use the existing shared codec's 0.085 meters-per-unit convention.

@@ -30,6 +30,17 @@ const Projection = (() => {
     const adjusted=[k[0]*factor,k[1]*factor,k[2],k[3]];
     return pinhole([v[0]+anchor[0],-v[1]+anchor[1],v[2]+anchor[2]+settings.distance-baseDistance],adjusted,rect,settings.pan);
   }
-  return {contain,pinhole,manual,estimated};
+  function handCloseup(points,k,aspect,width,height,span,zoom=1,pan=[0,0]) {
+    // Crop the original pinhole view without changing hand orientation. Use
+    // one pixel aspect for both axes; normalized fx and fy have different units.
+    const image=p=>pinhole(p,k,{x:0,y:0,w:aspect,h:1},[0,0]);
+    const projected=points.map(image).filter(p=>p);
+    if(!projected.length) return ()=>null;
+    const center=[0,1].map(a=>(Math.min(...projected.map(p=>p[a]))+Math.max(...projected.map(p=>p[a])))/2);
+    const depth=points.reduce((sum,p)=>sum+p[2],0)/points.length;
+    const scale=Math.min(width*.75,height*.75)*Math.max(.05,depth)/(span*k[1])*zoom;
+    return p=>{const q=image(p);return q?[width/2+(q[0]-center[0])*scale+pan[0],height/2+(q[1]-center[1])*scale+pan[1]]:null;};
+  }
+  return {contain,pinhole,manual,estimated,handCloseup};
 })();
 if(typeof module!=="undefined") module.exports=Projection;

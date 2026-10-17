@@ -10,7 +10,7 @@ let az = .45, el = .18, zoom = 1, panX = 0, panY = 0;
 let virtualPlaying = false, virtualStart = 0, virtualTime = 0, virtualRate = 1;
 let presentedTime = 0, videoFrames = false, seeking = false, resumeAfterSeek = false;
 let width = 1, height = 1;
-let cameraPoses=null, reconstruction=null, worldReconstruction=null, overlap=false;
+let cameraPoses=null, reconstruction=null, worldReconstruction=null, handTips=null, cameraHandTips=null, overlap=false;
 const alignment={yaw:0,pitch:0,fov:45,distance:3.5,pan:[0,0],opacity:.9};
 
 function cameraSettings() {
@@ -31,6 +31,7 @@ function resetAlignment() {
   cameraSettings();draw(current);
 }
 function setLayout() {
+  $("layout").querySelector('option[value="overlap"]').disabled=!meta.mediaKind || $("focus").value!=="body";
   overlap=$("layout").value==="overlap";
   document.body.classList.toggle("overlap",overlap);
   $("camera-controls").hidden=!overlap;
@@ -119,12 +120,21 @@ function draw(t) {
   ctx.clearRect(0,0,width,height);
   const frame = Math.max(0,Math.min(meta.frames-1,t*meta.fps));
   const selection = $("variant").value;
+  const focus = $("focus").value;
+  const hand = meta.hands && focus!=="body" ? meta.hands.sides[focus] : null;
+  $("hand-state").textContent=hand ? (selection==="body"?"Neutral fingers":["Unavailable","Observed","Interpolated","Held"][meta.hands.status[motionFrame(t)][focus==="left"?0:1]]) : "";
+  if(hand && selection!=="body" && meta.hands.wrist_status) {
+    const wrist=meta.hands.wrist_status[motionFrame(t)][focus==="left"?0:1];
+    $("hand-state").textContent+=" · "+["Body wrist","Palm observed","Palm interpolated","Palm held"][wrist];
+  }
   const selected = Math.max(0,meta.variants.indexOf(selection === "overlay" ? "corrected" : selection));
-  const useCamera=overlap && $("estimated").checked && cameraPoses;
+  const handCamera=hand && $("hand-view").value==="camera" && cameraHandTips;
+  const useCamera=(handCamera || overlap && $("estimated").checked) && cameraPoses;
+  const tipBuffer=handCamera?cameraHandTips:handTips;
   const sourceLayer=overlap && selection==="reconstruction";
   const boneNames=sourceLayer?meta.reconstruction.names:meta.names;
   const parents=sourceLayer?meta.reconstruction.parents:meta.parents;
-  const activeBody=sourceLayer?new Set(boneNames.map((_,i)=>i)):body;
+  const activeBody=hand?new Set(hand.bones):sourceLayer?new Set(boneNames.map((_,i)=>i)):body;
   const activeBuffer=sourceLayer?(useCamera?reconstruction:worldReconstruction):useCamera?cameraPoses:poses;
   const activeCount=boneNames.length;
   const point=(variant,bone)=>sample(sourceLayer?0:variant,bone,frame,activeBuffer,activeCount);
@@ -133,9 +143,22 @@ function draw(t) {
   const initialRoot = manualSource?sample(0,0,0,worldReconstruction,activeCount):sample(selected,meta.root,0);
   const center = $("follow").checked ? root : initialRoot;
   const framing=manualSource?meta.reconstruction:meta;
-  const origin = [center[0], framing.floor + framing.height*.48, center[2]];
-  const scale = Math.min(width*.58,height*.78) / meta.height * zoom;
+  let origin = [center[0], framing.floor + framing.height*.48, center[2]];
+  let scale = Math.min(width*.58,height*.78) / meta.height * zoom;
+  if(hand) {
+    const points=hand.bones.map(b=>point(selected,b));
+    for(const tip of hand.tips) points.push(sample(selected,tip,frame,tipBuffer,meta.hands.tip_bones.length));
+    origin=[0,1,2].map(axis=>(Math.min(...points.map(p=>p[axis]))+Math.max(...points.map(p=>p[axis])))/2);
+    scale=Math.min(width*.75,height*.75)/hand.span*zoom;
+  }
   let projectPoint = p => project(...p,origin,scale);
+  if(handCamera) {
+    const points=hand.bones.map(b=>point(selected,b));
+    for(const tip of hand.tips) points.push(sample(selected,tip,frame,tipBuffer,meta.hands.tip_bones.length));
+    const lo=Math.floor(frame),hi=Math.min(meta.frames-1,lo+1),a=frame-lo;
+    const k=meta.camera.intrinsics[lo].map((v,i)=>v*(1-a)+meta.camera.intrinsics[hi][i]*a);
+    projectPoint=Projection.handCloseup(points,k,meta.camera.image_aspect,width,height,hand.span,zoom,[panX,panY]);
+  }
   let imageRect=null;
   if(overlap) {
     const media=meta.mediaKind==="image"?$("image"):video;
@@ -150,7 +173,7 @@ function draw(t) {
     } else projectPoint=p=>Projection.manual(p,origin,alignment,imageRect);
     ctx.save();ctx.beginPath();ctx.rect(imageRect.x,imageRect.y,imageRect.w,imageRect.h);ctx.clip();
   }
-  if(!overlap) {
+  if(!overlap && !hand) {
   const gx = Math.floor(center[0]), gz = Math.floor(center[2]);
   for (let d=-8; d<=8; d++) {
     line(projectPoint([gx+d,meta.floor,gz-8]),projectPoint([gx+d,meta.floor,gz+8]),"#232e3b");
@@ -174,7 +197,7 @@ function draw(t) {
     if(ghost) ctx.setLineDash([5,4]);
     for(let i=0;i<activeCount;i++) {
       const parent=parents[i];
-      if(parent<0 || (!$("helpers").checked && (!activeBody.has(i) || ["Master","Center","Groove"].includes(boneNames[parent])))) continue;
+      if(parent<0 || (hand && (!activeBody.has(i) || !activeBody.has(parent))) || (!$("helpers").checked && (!activeBody.has(i) || ["Master","Center","Groove"].includes(boneNames[parent])))) continue;
       const name=boneNames[i].toLowerCase();
       const color=ghost?"#f5cd7d":name.startsWith("left")?"#68aaff":name.startsWith("right")?"#ff8586":"#c6d1df";
       // A dark outline keeps limbs legible against bright source footage.
@@ -183,9 +206,16 @@ function draw(t) {
     }
     ctx.setLineDash([]);
     for(let i=0;i<activeCount;i++) {
-      if(!points[i] || (!$("helpers").checked && (!activeBody.has(i) || ["Master","Center","Groove"].includes(boneNames[i])))) continue;
+      if(!points[i] || (hand && !activeBody.has(i)) || (!$("helpers").checked && (!activeBody.has(i) || ["Master","Center","Groove"].includes(boneNames[i])))) continue;
       ctx.beginPath(); ctx.arc(...points[i],activeBody.has(i)?3:1.5,0,Math.PI*2);
       ctx.fillStyle=ghost?"#f5cd7d":"#e4edf7"; ctx.fill();
+    }
+    if(handTips && !overlap) for(let tip=0;tip<meta.hands.tip_bones.length;tip++) {
+      if(hand && !hand.tips.includes(tip)) continue;
+      const bone=meta.hands.tip_bones[tip], end=projectPoint(sample(variant,tip,frame,tipBuffer,meta.hands.tip_bones.length));
+      const color=ghost?"#f5cd7d":meta.names[bone].startsWith("Left")?"#68aaff":"#ff8586";
+      line(points[bone],end,color,2.7);
+      if(end) {ctx.beginPath();ctx.arc(...end,2.5,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();}
     }
     ctx.globalAlpha=1;
   }
@@ -232,10 +262,26 @@ async function init() {
     reconstruction=new Float32Array(await responses[1].arrayBuffer());
     if(cameraPoses.length!==poses.length || reconstruction.length!==meta.frames*meta.camera.names.length*3) throw new Error("Incomplete camera pose buffer");
   }
+  if(meta.hands) {
+    const response=await fetch("/api/hand-tips.bin");
+    if(!response.ok) throw new Error("Cannot load hand fingertip geometry");
+    handTips=new Float32Array(await response.arrayBuffer());
+    if(handTips.length!==meta.variants.length*meta.frames*meta.hands.tip_bones.length*3) throw new Error("Incomplete fingertip buffer");
+    if(meta.camera) {
+      const cameraResponse=await fetch("/api/camera-hand-tips.bin");
+      if(!cameraResponse.ok) throw new Error("Cannot load camera fingertip geometry");
+      cameraHandTips=new Float32Array(await cameraResponse.arrayBuffer());
+      if(cameraHandTips.length!==handTips.length) throw new Error("Incomplete camera fingertip buffer");
+    }
+    $("hand-view").querySelector('option[value="camera"]').disabled=!cameraHandTips;
+    $("hand-view").value=cameraHandTips?"camera":"orbit";
+    $("focus").disabled=false;
+    $("capture-note").textContent="Fingers from hand cache · Face neutral";
+  }
   document.title=`${meta.title} · V2VMD inspector`;
   $("summary").textContent=`${meta.frames.toLocaleString()} frames · ${meta.fps} fps · ${count} bones`;
   $("source-name").textContent=meta.source||"No source media";
-  for(const variant of meta.variants) $("variant").add(new Option(variant==="corrected"?"Corrected":"Raw",variant));
+  for(const variant of meta.variants) $("variant").add(new Option(({corrected:"Corrected",raw:"Raw",body:"Body only"})[variant]||variant,variant));
   if(meta.variants.includes("raw")) $("variant").add(new Option("Overlay · raw / corrected","overlay"));
   if(meta.reconstruction) {const option=new Option("Source reconstruction","reconstruction");option.disabled=true;$("variant").add(option);}
   $("variant").onchange=()=>{ $("overlay-key").hidden=$("variant").value!=="overlay"; draw(current); };
@@ -273,6 +319,8 @@ async function init() {
     resetAlignment();setLayout();
   };
   $("layout").onchange=setLayout;
+  $("focus").onchange=()=>{ $("layout").value="split";$("hand-view").hidden=$("focus").value==="body";panX=panY=0;zoom=1;setLayout(); };
+  $("hand-view").onchange=()=>{panX=panY=0;zoom=1;draw(current);};
   $("overlap-follow").onchange=()=>{$("follow").checked=$("overlap-follow").checked;draw(current);};
   $("align-reset").onclick=resetAlignment;
   for(const id of ["fov","distance","pan-x","pan-y","opacity"]) $(id).oninput=()=>{
@@ -296,8 +344,8 @@ async function init() {
   $("sound").onclick=()=>{video.muted=!video.muted;$("sound").textContent=video.muted?"Unmute":"Mute";$("sound").setAttribute("aria-pressed",String(!video.muted));};
   const reset=()=>{az=.45;el=.18;zoom=1;panX=panY=0;draw(current);};
   $("reset").onclick=reset;
-  $("front").onclick=()=>{az=0;el=0;panX=panY=0;draw(current);};
-  $("side").onclick=()=>{az=Math.PI/2;el=0;panX=panY=0;draw(current);};
+  $("front").onclick=()=>{$("hand-view").value="orbit";az=0;el=0;panX=panY=0;draw(current);};
+  $("side").onclick=()=>{$("hand-view").value="orbit";az=Math.PI/2;el=0;panX=panY=0;draw(current);};
   $("follow").onchange=()=>{$("overlap-follow").checked=$("follow").checked;draw(current);};
   $("helpers").onchange=()=>draw(current);
   let drag=null;
@@ -313,7 +361,9 @@ async function init() {
         alignment.pan=alignment.pan.map((v,i)=>Math.max(-1,Math.min(1,v+[dx/rect.w,dy/rect.h][i])));
       } else {alignment.yaw+=dx*.01;alignment.pitch=Math.max(-1.3,Math.min(1.3,alignment.pitch+dy*.01));}
       cameraSettings();
-    } else if(e.shiftKey){panX+=dx;panY+=dy;}else{az+=dx*.01;el=Math.max(-1.3,Math.min(1.3,el+dy*.01));}
+    } else if(e.shiftKey){panX+=dx;panY+=dy;}else{
+      $("hand-view").value="orbit";az+=dx*.01;el=Math.max(-1.3,Math.min(1.3,el+dy*.01));
+    }
     draw(current);
   };
   canvas.onpointerup=canvas.onpointercancel=()=>{drag=null;};

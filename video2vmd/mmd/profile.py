@@ -103,6 +103,17 @@ def pmx_profile(path: Path, unit=0.085):
                       mapping, unit, str(path))
     profile.knee_limits = {}
     profile.ik_chains = {}
+    profile.hand_tail_offsets = {}
+    profile.unsupported_hand_controls = []
+    for new, old in enumerate(order):
+        name, bone = translated[new], raw[old]
+        if any(part in name for part in ("Finger", "Thumb", "Pinky")):
+            if "tail_offset" in bone:
+                profile.hand_tail_offsets[name] = np.asarray(bone["tail_offset"])*unit
+            elif 0 <= bone.get("tail", -1) < len(raw):
+                profile.hand_tail_offsets[name] = (np.asarray(raw[bone["tail"]]["position"])-bone["position"])*unit
+            if "inherit" in bone or "fixed_axis" in bone:
+                profile.unsupported_hand_controls.append(name)
     body = {"HipMaster", "Torso", "Torso2", "Neck", "Head"}
     body.update(side+part for side in ("Left", "Right") for part in
                 ("Shoulder", "Arm", "Elbow", "Wrist", "Leg", "Knee", "Ankle"))
