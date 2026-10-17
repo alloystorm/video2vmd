@@ -64,3 +64,37 @@ side. Poor fits and possible cuts are reported. It cannot reliably identify
 optical-axis camera movement or recover a metric trajectory. Target image
 displacement measures changes under the estimated camera, not error against
 observed landmarks; the depth-only reprojection budget does not constrain feet.
+
+## Authored VMD reference
+
+```powershell
+python scripts/compare_reference_vmd.py outputs/diagnostics/noise_study_20261017 --archive "D:\studio\Unity\content\motion\fav\Hibikase.zip"
+```
+
+This adds `reference_hibikase/` and a link in the main report. By default it selects
+the largest VMD in the archive (the dance, excluding separate camera/face VMDs);
+`--member` selects an explicit ZIP member. Only that VMD and the English readme
+are copied to ignored outputs. Keep the readme credit: original motion Miku VR,
+converted/fixed by GentleWhiteCat. The input archive is read-only.
+
+`sample_reference_vmd_blender.py` evaluates the same AB7 PMX armature in a fresh
+background Blender process, with no character geometry or physics. MMD Tools
+creates an empty bookkeeping mesh. All authored foot/toe IK is honored in the
+primary variant; another variant mutes native IK and IK knee-limit constraints.
+World joint positions and physical bone rotations are converted to MMD Y-up
+meters. The external project environment handles analysis; Blender imports no
+Torch/GVHMR/project training packages. `--blender`, `--mmd-tools` and `--model`
+select other local paths; reference and generated runs must share the PMX hash.
+
+Reference sampling is cached by input VMD hash and PMX profile hash; `--resample`
+forces fresh evaluation. Figures include reference XYZ positions, 3/5 Hz summary
+comparisons, frequency spectra, equal seven-second window distributions and an
+activity plot. Seven-second windows stride by 3.5 seconds; their overlap means
+they are not independent observations. No time warping or pose alignment is
+applied. CSV/JSON files preserve positions, metrics and provenance.
+
+The reference is a different dance, with different tempo and activity, and was
+authored for a different original character. On AB7 its floor/IK behavior also
+reflects model adaptation. It is a descriptive reference, not paired ground truth,
+a noise-free ideal, or a target level of smoothing. A generated trajectory with
+lower high-frequency RMS is not necessarily more accurate or more natural.

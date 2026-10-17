@@ -470,6 +470,8 @@ def build_report(root, results):
         "4. Review clips with substantial background movement before interpreting static-camera depth correction; calibrated intrinsics and moving-camera estimation need a separate experiment."])
     (root/"findings.md").write_text("\n".join(findings)+"\n",encoding="utf-8")
     body.insert(3,'<details><summary><strong>Findings and interpretation</strong></summary><pre style="white-space:pre-wrap;font:inherit">'+html.escape("\n".join(findings))+"</pre></details>")
+    if (root/"reference_hibikase/index.html").exists():
+        body.insert(3,'<p><strong><a href="reference_hibikase/">Compare with Hibikase reference VMD: hip/feet plots, spectra and equal-duration windows</a></strong></p>')
     for r in results:
         name=r["clip"]
         lines.extend(["",f"## {name}","",f"{r['frames']} frames; {r['fixed_contact_frames']} frames / {r['fixed_contact_samples']} heel-toe samples labeled contact.",
