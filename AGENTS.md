@@ -102,6 +102,7 @@ Run `node scripts/verify_inspection_projection.cjs` for overlap projection chang
 Run `python scripts/verify_depth_cleanup.py` for depth-cleanup or related pipeline changes.
 Run `python scripts/verify_feet.py` for contact, heel/toe pitch or leg-solver changes.
 Run `python scripts/verify_noise_analysis.py` for batch-analysis metric changes.
+Run `python scripts/verify_hand_motion.py` for hand observation/cache or gap-interpolation changes.
 See `docs/noise-analysis.md` for reproducible multi-video processing and ablations.
 `scripts/cache_inspection_camera.py` can add camera arrays to an older run using
 its matching trusted local GVHMR cache; it needs SMPL-X but does not rerun inference.

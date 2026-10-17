@@ -7,6 +7,9 @@ assets/**
 !assets/README.md
 !assets/**/.gitkeep
 
+# Locally supplied licensed body/hand model archives and extracted files.
+models/
+
 # ── Auto-downloaded inference weights (GVHMR / 2D pose, etc.) ─
 weights/**
 !weights/.gitkeep
