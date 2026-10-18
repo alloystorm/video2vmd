@@ -4,6 +4,11 @@ Prepared 2026-10-18. Status: proposed experiment; implementation and training
 have not started. Model sizes and dataset volumes below are planning estimates,
 to be revised using measured learning curves and held-out results.
 
+Renderer progress (2026-10-18): the dxr_native CLI has passed a short
+render/sidecar/reconstruct/export smoke test. See [the verified workflow and
+results](dxr-rendering.md). Model training and the reference-to-SMPL joint adapter
+remain outstanding.
+
 ## Objective
 
 Train a model to recover accurate body motion from the errors introduced by our
