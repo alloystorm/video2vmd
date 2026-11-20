@@ -3,22 +3,30 @@
 Extract body motion from a single-person video or still image and export MMD
 **VMD** or **BVH** animation. Command: `v2vmd`.
 
+> **v0.2.0 public preview:** supports single-person video or still extraction to
+> VMD or BVH, a local synchronized motion inspector, and a Blender 4.2+
+> extension. `--depth-cleanup`, `--foot-lock`, and `--hands` are opt-in; face,
+> gaze, and secondary physics are not captured. Upstream extraction models are
+> limited to non-commercial / research use — see [NOTICE.md](NOTICE.md).
+
 ```text
 video / image -> GVHMR + SMPL-X -> reusable human skeleton
                                       |
-                         direct MMD retargeting
+     direct MMD retargeting + optional depth/foot cleanup
                                       |
-                       optional foot-contact cleanup
+                    optional WiLoR hand retargeting
                                       |
                     raw VMD + corrected VMD / BVH
 ```
 
 ## Install
 
-Python 3.11+, Git, and an environment with PyTorch for your device. For CUDA,
-use a CUDA-enabled PyTorch installation before selecting `--device cuda`.
+Requires Python 3.11+ and Git. Create and activate a Python 3.11+ virtual
+environment and install PyTorch for your target device (CPU, CUDA from
+pytorch.org, or MPS) **before** installing Video2VMD so `--device cuda` uses a
+CUDA-enabled build:
 
-```powershell
+```bash
 git clone https://github.com/alloystorm/video2vmd.git
 cd video2vmd
 python -m pip install --upgrade pip setuptools wheel
@@ -41,12 +49,15 @@ Inference weights download to `weights/` on first extraction (about 5 GB).
   SMPL-X model and inference weights are not needed for retargeting.
 - **Optional PMX:** `--model character.pmx` fits the target's skeleton/proportions.
   Without it, the shared standard MMD A-pose is used. Extract ZIP archives first.
+- **Optional hands (`--hands`):** requires a separately configured local WiLoR
+  setup and the licensed `MANO_RIGHT.pkl` at `assets/body_models/mano/MANO_RIGHT.pkl`.
+  See [hand setup and conventions](docs/hand-pose.md).
 
 User assets and generated outputs are gitignored. See [asset locations](assets/README.md).
 
 ## Run
 
-```powershell
+```bash
 v2vmd doctor
 v2vmd run --video assets/video/dance.mp4 --device cuda --foot-lock
 v2vmd run assets/video/dance.mp4 --device cuda --foot-lock --inspect
@@ -60,7 +71,7 @@ v2vmd doctor --skeleton outputs/previous/skeleton_motion.npz
 v2vmd run --skeleton outputs/previous/skeleton_motion.npz --model assets/mmd/character.pmx --foot-lock
 v2vmd run --skeleton outputs/previous/skeleton_motion.npz --hand-motion outputs/hands_run/hand_motion.npz --model assets/mmd/character.pmx --inspect
 
-# BVH or canonical motion_encoder data.
+# BVH or optional canonical 404-column NPY export (--motion-encoder).
 v2vmd run --skeleton outputs/previous/skeleton_motion.npz --format bvh --no-preview
 v2vmd run --skeleton outputs/previous/skeleton_motion.npz --motion-encoder
 ```
@@ -104,7 +115,10 @@ Cleanup is opt-in: genuine fast motion can occupy the same frequency band as jit
 source video on the left, interactive 3D skeleton on the right, and one shared
 timeline below. Video time drives the skeleton, including seeking and playback
 speed changes. Pause, step frame by frame, orbit/zoom, or compare **Raw**,
-**Corrected** and **Overlay**. The default view hides PMX helper bones.
+**Corrected** and **Overlay**. The default view hides PMX helper bones. On
+hand-enabled runs, choosing **Left hand** or **Right hand** under Skeleton
+focus opens a cropped source-camera hand close-up (or free orbit) with fingertip
+FK, observation status, and a **Body only** neutral-finger comparison.
 
 Choose **Overlap video** in the viewer's top bar to draw the skeleton directly
 over the source. Adjust **Vertical FOV**, **Distance**, **Pan X/Y** and **Opacity**;
@@ -121,7 +135,7 @@ Their saved source reconstruction is available with the manual camera too.
 
 Reopen an existing run without extraction or retargeting:
 
-```powershell
+```bash
 v2vmd inspect outputs/previous
 v2vmd inspect outputs/previous --video path/to/original.mp4
 v2vmd inspect outputs/previous --port 8765 --no-browser
@@ -140,7 +154,7 @@ PMX physics, and a destination application's IK solver are not simulated.
 For development, an older run can gain camera observations from its matching
 local GVHMR prediction cache, without rerunning the detector or motion network:
 
-```powershell
+```bash
 python scripts/cache_inspection_camera.py outputs/previous --prediction outputs/original/cache/clip/hmr4d_results.pt --device cuda
 ```
 
@@ -151,23 +165,31 @@ cached root transforms and adds camera arrays to that run's skeleton NPZ.
 
 The [Video2VMD extension](blender_extension/README.md) runs the external Python
 pipeline and displays progress. It imports BVH skeletons directly. VMD can be
-applied to a selected PMX armature with MMD Tools enabled. Blender's Python does
-not load PyTorch, GVHMR or OpenCV.
+applied to a selected PMX armature with MMD Tools enabled. The Blender panel
+exposes **Foot Contact Cleanup**, **Root Depth Cleanup**, VMD/BVH output, and
+optional **PMX Foot IK**; `--hands`, `--hand-motion`, and `--inspect` are
+currently CLI-only. Blender's Python does not load PyTorch, GVHMR or OpenCV.
 
 ## Development
 
-```powershell
+```bash
 python scripts/verify_mmd.py
 python scripts/verify_video_input.py
 python scripts/verify_blender_extension.py
 python scripts/verify_inspection.py
 python scripts/verify_depth_cleanup.py
+python scripts/verify_feet.py
+python scripts/verify_hand_motion.py
+python scripts/verify_hand_extraction.py
+python scripts/verify_hand_retargeting.py
+python scripts/verify_noise_analysis.py
 node scripts/verify_inspection_projection.cjs
 python scripts/package_blender_extension.py
 ```
 
-See [AGENTS.md](AGENTS.md), the [implementation plan](docs/vmd-retargeting-plan.md)
-and the [Blender smoke checklist](docs/blender-extension.md).
+See [AGENTS.md](AGENTS.md), the [VMD/BVH technical guide](docs/vmd-retargeting.md),
+[hand setup and conventions](docs/hand-pose.md), and the
+[Blender smoke checklist](docs/blender-extension.md).
 
 ## Migration and credits
 
@@ -178,5 +200,8 @@ Mixamo exporter have been removed. Existing `skeleton_motion.npz` files work.
 Disable the old Blender extension and install `dist/video2vmd-0.2.0.zip`.
 
 This fork builds on [MaxLiu22/Motion2MixamoRig](https://github.com/MaxLiu22/Motion2MixamoRig).
-Older release notes and translated upstream READMEs are historical. See
-[LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for upstream licensing and attribution.
+Older release notes and translated upstream READMEs are historical. Video2VMD's
+own code is Apache-2.0, while the end-to-end extraction pipeline relies on
+non-commercial / research upstream components (GVHMR, SMPL-X, and optional
+WiLoR/MANO) plus AGPL-3.0 YOLOv8; see [LICENSE](LICENSE) and
+[NOTICE.md](NOTICE.md) for upstream licensing and attribution.
